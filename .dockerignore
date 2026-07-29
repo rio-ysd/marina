@@ -1,0 +1,5 @@
+.env
+.git
+gkey.json
+*.pem
+*.key

@@ -1,0 +1,11 @@
+CREATE TABLE tasks (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    slack_channel VARCHAR(64) NOT NULL,
+    slack_user VARCHAR(64) NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    status ENUM('open', 'done') NOT NULL DEFAULT 'open',
+    due_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_tasks_channel_status (slack_channel, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

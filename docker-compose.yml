@@ -1,0 +1,63 @@
+services:
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: marina
+      MYSQL_DATABASE: marina
+      MYSQL_USER: marina
+      MYSQL_PASSWORD: marina
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmarina"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=mysql://marina:marina@tcp(mysql:3306)/marina
+      - up
+
+  app:
+    build:
+      context: .
+      args:
+        CMD: server
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8091:8080"
+    environment:
+      PORT: "8080"
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-anthropic.claude-sonnet-5}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+      DB_DSN: "marina:marina@tcp(mysql:3306)/marina?parseTime=true&loc=Local"
+      BEDROCK_REGION: ${BEDROCK_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_IMPERSONATED_USER: ${GOOGLE_IMPERSONATED_USER:-}
+      MF_CLIENT_ID: ${MF_CLIENT_ID:-}
+      MF_CLIENT_SECRET: ${MF_CLIENT_SECRET:-}
+      MORNING_DIGEST_SLACK_CHANNEL: ${MORNING_DIGEST_SLACK_CHANNEL:-}
+
+volumes:
+  mysql_data:
