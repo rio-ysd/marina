@@ -14,12 +14,19 @@ Function Callingツールとして提供します。
 - `internal/bedrockclient` — Amazon Bedrock経由でAnthropicクライアントを構築
 - `internal/tools` — タスク/リマインダー/Gmail/MoneyForward請求書のFunction Calling定義
 - `internal/slack` — Slack Events API受信・署名検証・応答送信
+- `internal/mfoauth` — MoneyForwardクラウド請求書API用OAuth2認可コールバック(`/mf/oauth/start`, `/mf/oauth/callback`)
 - `internal/storage` — MySQL(RDS)への永続化
 - `internal/morningdigest` — 朝のGmailダイジェストのロジック
 - `migrations` — golang-migrate用SQLマイグレーション
 
-Gmail連携・MoneyForward請求書連携は認証情報が未確定のため、インターフェース(`internal/tools`内の
-`GmailClient`/`MFInvoiceClient`)とモック実装のみ用意しています。認証情報が揃った時点で実装を追加してください。
+Gmail連携はGoogle Workspaceサービスアカウント + ドメイン委任(`GmailClient`)、MoneyForward請求書連携は
+OAuth2 authorizationCodeフロー(`MFInvoiceClient`)で実装しています。いずれも認証情報未設定時はモック実装で動作します。
+
+MoneyForward請求書APIはOAuth2のみをサポートしており、APIキー方式は使えません。初回のみ人間がブラウザで
+`https://<公開ドメイン>/mf/oauth/start` にアクセスして認可する必要がありますが、以降はrefresh_tokenが
+`oauth_tokens`テーブルに保存され自動更新されるため、Slackからの利用時に人間の介入は不要です。
+見積書・請求書を作成する前に、Claudeが`mf_search_partners`ツールで取引先のdepartment_idを確認してから
+`mf_create_estimate`/`mf_create_invoice`を呼び出します。
 
 ## Claude / Amazon Bedrockの設定
 

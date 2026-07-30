@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -29,7 +30,16 @@ func init() {
 
 // handler はAPI Gateway(REST API/HTTP API プロキシ統合)からのイベントをHandler.ServeHTTPに橋渡しします。
 func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, req.HTTPMethod, req.Path, strings.NewReader(req.Body))
+	path := req.Path
+	if len(req.QueryStringParameters) > 0 {
+		query := url.Values{}
+		for k, v := range req.QueryStringParameters {
+			query.Set(k, v)
+		}
+		path += "?" + query.Encode()
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.HTTPMethod, path, strings.NewReader(req.Body))
 	if err != nil {
 		return events.APIGatewayProxyResponse{StatusCode: http.StatusBadRequest}, nil
 	}
@@ -38,7 +48,7 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 	}
 
 	recorder := httptest.NewRecorder()
-	marinaApp.SlackHandler.ServeHTTP(recorder, httpReq)
+	marinaApp.Mux().ServeHTTP(recorder, httpReq)
 
 	headers := map[string]string{}
 	for k := range recorder.Header() {

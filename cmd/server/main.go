@@ -21,12 +21,7 @@ func main() {
 	}
 	defer a.DB.Close()
 
-	mux := http.NewServeMux()
-	mux.Handle("/slack/events", a.SlackHandler)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux := a.Mux()
 
 	port := os.Getenv("PORT")
 	if port == "" {

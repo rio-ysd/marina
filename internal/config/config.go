@@ -24,9 +24,11 @@ type Config struct {
 	GoogleImpersonatedUser string
 
 	// MFClientID/MFClientSecret はMoneyForwardクラウド会計APIのOAuthクレデンシャル。
-	// 未設定の場合はMF請求書ツールはモッククライアントで動作する。
-	MFClientID     string
-	MFClientSecret string
+	// MFOAuthRedirectURIは認可コールバックのリダイレクトURI。
+	// いずれかが未設定の場合はMF請求書ツールはモッククライアントで動作する。
+	MFClientID         string
+	MFClientSecret     string
+	MFOAuthRedirectURI string
 
 	// MorningDigestSlackChannel は朝のダイジェストを送信するSlackチャンネル/DM先ID。
 	MorningDigestSlackChannel string
@@ -44,6 +46,7 @@ func Load() (*Config, error) {
 		GoogleImpersonatedUser:    os.Getenv("GOOGLE_IMPERSONATED_USER"),
 		MFClientID:                os.Getenv("MF_CLIENT_ID"),
 		MFClientSecret:            os.Getenv("MF_CLIENT_SECRET"),
+		MFOAuthRedirectURI:        os.Getenv("MF_OAUTH_REDIRECT_URI"),
 		MorningDigestSlackChannel: os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
 	}
 
@@ -68,7 +71,7 @@ func (c *Config) HasGmailCredentials() bool {
 
 // HasMFCredentials はMoneyForward請求書APIの実クライアントが利用可能かを返します。
 func (c *Config) HasMFCredentials() bool {
-	return c.MFClientID != "" && c.MFClientSecret != ""
+	return c.MFClientID != "" && c.MFClientSecret != "" && c.MFOAuthRedirectURI != ""
 }
 
 func getEnvDefault(key, def string) string {

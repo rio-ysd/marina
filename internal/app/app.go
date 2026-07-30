@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 
 	slackapi "github.com/slack-go/slack"
 
 	"github.com/yoshida-rio/marina/internal/agent"
 	"github.com/yoshida-rio/marina/internal/bedrockclient"
 	"github.com/yoshida-rio/marina/internal/config"
+	"github.com/yoshida-rio/marina/internal/mfoauth"
 	"github.com/yoshida-rio/marina/internal/morningdigest"
 	"github.com/yoshida-rio/marina/internal/slack"
 	"github.com/yoshida-rio/marina/internal/storage"
@@ -21,6 +23,7 @@ type App struct {
 	Config              *config.Config
 	DB                  *sql.DB
 	SlackHandler        *slack.Handler
+	MFOAuthHandler      http.Handler
 	ReminderRepo        *storage.ReminderRepo
 	SlackClient         *slackapi.Client
 	MorningDigestRunner *morningdigest.Runner
@@ -62,9 +65,13 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build gmail tools: %w", err)
 	}
 
+	oauthTokenRepo := storage.NewOAuthTokenRepo(db)
 	var mfClient tools.MFInvoiceClient = tools.NewMockMFInvoiceClient()
+	var mfOAuthHandler http.Handler
 	if cfg.HasMFCredentials() {
-		// TODO: MoneyForwardクラウド会計のOAuthクライアントに切り替える。
+		mfOAuthConfig := mfoauth.NewOAuthConfig(cfg.MFClientID, cfg.MFClientSecret, cfg.MFOAuthRedirectURI)
+		mfClient = tools.NewRealMFInvoiceClient(mfOAuthConfig, oauthTokenRepo)
+		mfOAuthHandler = mfoauth.NewHandler(mfOAuthConfig, oauthTokenRepo)
 	}
 	mfTools, err := tools.NewMFInvoiceTools(mfClient)
 	if err != nil {
@@ -87,9 +94,25 @@ func New(cfg *config.Config) (*App, error) {
 		Config:              cfg,
 		DB:                  db,
 		SlackHandler:        handler,
+		MFOAuthHandler:      mfOAuthHandler,
 		ReminderRepo:        reminderRepo,
 		SlackClient:         slackClient,
 		MorningDigestRunner: digestRunner,
 		Agent:               ag,
 	}, nil
+}
+
+// Mux はSlackイベント・ヘルスチェック・(設定されていれば)MoneyForward OAuthコールバックを
+// まとめて登録したhttp.ServeMuxを構築します。
+func (a *App) Mux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/slack/events", a.SlackHandler)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	if a.MFOAuthHandler != nil {
+		mux.Handle("/mf/oauth/", a.MFOAuthHandler)
+	}
+	return mux
 }
