@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 
 	slackapi "github.com/slack-go/slack"
@@ -13,6 +14,7 @@ import (
 	"github.com/yoshida-rio/marina/internal/config"
 	"github.com/yoshida-rio/marina/internal/mfoauth"
 	"github.com/yoshida-rio/marina/internal/morningdigest"
+	"github.com/yoshida-rio/marina/internal/proxyreply"
 	"github.com/yoshida-rio/marina/internal/slack"
 	"github.com/yoshida-rio/marina/internal/storage"
 	"github.com/yoshida-rio/marina/internal/tools"
@@ -23,11 +25,13 @@ type App struct {
 	Config              *config.Config
 	DB                  *sql.DB
 	SlackHandler        *slack.Handler
+	InteractionHandler  *slack.InteractionHandler
 	MFOAuthHandler      http.Handler
 	ReminderRepo        *storage.ReminderRepo
 	SlackClient         *slackapi.Client
 	MorningDigestRunner *morningdigest.Runner
 	Agent               *agent.Agent
+	ProxyReply          *proxyreply.Service
 }
 
 // New は環境変数から設定を読み込み、DB接続・ツール・Agent・Slackハンドラを構築します。
@@ -86,20 +90,72 @@ func New(cfg *config.Config) (*App, error) {
 	}
 	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo)
 
-	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, ag)
 	slackClient := slackapi.New(cfg.SlackBotToken)
+
+	// 代理返信フロー: User OAuthトークンがあり、その持ち主が対象ユーザーと一致する場合のみ有効化する。
+	// 有効でない場合は slack.ProxyReplier をnilのまま渡し、従来どおりmarina自身が応答する。
+	var proxyService *proxyreply.Service
+	var proxyReplier slack.ProxyReplier
+	if targetUserID, userClient := resolveProxyReplyTarget(cfg); userClient != nil {
+		proxyService = proxyreply.NewService(
+			proxyreply.Config{
+				TargetUserID:    targetUserID,
+				AllowedChannels: cfg.ProxyReplyChannelIDs,
+				IncludeDM:       cfg.ProxyReplyIncludeDM,
+			},
+			ag,
+			storage.NewReplyDraftRepo(db),
+			slackClient,
+			userClient,
+		)
+		proxyReplier = proxyService
+	}
+
+	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, ag, proxyReplier)
+	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier)
 	digestRunner := morningdigest.NewRunner(anthropicClient, cfg.AnthropicModel, gmailClient, slackClient, cfg.MorningDigestSlackChannel)
 
 	return &App{
 		Config:              cfg,
 		DB:                  db,
 		SlackHandler:        handler,
+		InteractionHandler:  interactionHandler,
 		MFOAuthHandler:      mfOAuthHandler,
 		ReminderRepo:        reminderRepo,
 		SlackClient:         slackClient,
 		MorningDigestRunner: digestRunner,
 		Agent:               ag,
+		ProxyReply:          proxyService,
 	}, nil
+}
+
+// resolveProxyReplyTarget は代理返信フローの対象ユーザーIDとUser OAuthトークンのクライアントを返します。
+// 代理返信できるのはトークンの持ち主本人だけなので、auth.testで実際の持ち主を確認し、
+// PROXY_REPLY_TARGET_USER_IDと食い違う場合は誤った相手として投稿しないよう機能を無効化します。
+// PROXY_REPLY_TARGET_USER_IDが未設定の場合はトークンの持ち主を対象ユーザーとして採用します。
+// 無効な場合は (\"\", nil) を返します。
+func resolveProxyReplyTarget(cfg *config.Config) (string, *slackapi.Client) {
+	if cfg.SlackUserOAuthToken == "" {
+		return "", nil
+	}
+
+	userClient := slackapi.New(cfg.SlackUserOAuthToken)
+	auth, err := userClient.AuthTest()
+	if err != nil {
+		log.Printf("proxy reply disabled: user oauth token auth test failed: %v", err)
+		return "", nil
+	}
+
+	switch {
+	case cfg.ProxyReplyTargetUserID == "":
+		log.Printf("proxy reply target user resolved from user oauth token: %s", auth.UserID)
+	case cfg.ProxyReplyTargetUserID != auth.UserID:
+		log.Printf("proxy reply disabled: PROXY_REPLY_TARGET_USER_ID=%s does not match the user oauth token owner (%s). "+
+			"SLACK_USER_OAUTH_TOKEN must be authorized by the target user themselves",
+			cfg.ProxyReplyTargetUserID, auth.UserID)
+		return "", nil
+	}
+	return auth.UserID, userClient
 }
 
 // Mux はSlackイベント・ヘルスチェック・(設定されていれば)MoneyForward OAuthコールバックを
@@ -107,6 +163,7 @@ func New(cfg *config.Config) (*App, error) {
 func (a *App) Mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/slack/events", a.SlackHandler)
+	mux.Handle("/slack/interactions", a.InteractionHandler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

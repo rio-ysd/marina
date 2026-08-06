@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config は marina の実行に必要な環境変数をまとめたものです。
@@ -32,6 +33,24 @@ type Config struct {
 
 	// MorningDigestSlackChannel は朝のダイジェストを送信するSlackチャンネル/DM先ID。
 	MorningDigestSlackChannel string
+
+	// SlackUserOAuthToken は代理返信で本人として投稿するためのUser OAuthトークン(xoxp-)。
+	// 設定されている場合のみ代理返信フローが有効になる。
+	// ProxyReplyTargetUserID は代理返信の対象者のSlackユーザーID。
+	// 代理返信できるのはトークンの持ち主本人だけなので、値はトークンの持ち主と一致していなければならない
+	// (食い違う場合は起動時に代理返信を無効化する)。未設定ならトークンの持ち主が採用される。
+	SlackUserOAuthToken    string
+	ProxyReplyTargetUserID string
+
+	// SlackAppToken はSocket Mode用のApp-Level Token(xapp-、スコープconnections:write)。
+	// cmd/socketmodeでのみ使用し、HTTP受信(cmd/server, cmd/lambda)では不要。
+	SlackAppToken string
+	// ProxyReplyChannelIDs は代理返信を有効にするチャンネルIDの許可リスト(カンマ区切り)。
+	// 空の場合はBotが参加している全チャンネルを対象とする。DMには影響しない。
+	ProxyReplyChannelIDs []string
+	// ProxyReplyIncludeDM は本人へのDMも代理返信の対象にするか(既定: true)。
+	// 有効にするにはUser OAuthトークンに im:history スコープが必要。
+	ProxyReplyIncludeDM bool
 }
 
 // Load は環境変数からConfigを構築します。必須項目が欠けている場合はerrorを返します。
@@ -48,6 +67,11 @@ func Load() (*Config, error) {
 		MFClientSecret:            os.Getenv("MF_CLIENT_SECRET"),
 		MFOAuthRedirectURI:        os.Getenv("MF_OAUTH_REDIRECT_URI"),
 		MorningDigestSlackChannel: os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
+		SlackUserOAuthToken:       os.Getenv("SLACK_USER_OAUTH_TOKEN"),
+		SlackAppToken:             os.Getenv("SLACK_APP_TOKEN"),
+		ProxyReplyTargetUserID:    os.Getenv("PROXY_REPLY_TARGET_USER_ID"),
+		ProxyReplyChannelIDs:      splitAndTrim(os.Getenv("PROXY_REPLY_CHANNEL_IDS")),
+		ProxyReplyIncludeDM:       getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
 	}
 
 	required := map[string]string{
@@ -79,6 +103,21 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// splitAndTrim はカンマ区切りの環境変数値を空要素を除いたスライスにします。
+func splitAndTrim(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func getEnvBool(key string, def bool) bool {

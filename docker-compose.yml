@@ -1,3 +1,25 @@
+# appコンテナ(HTTP受信)とsocketmodeコンテナ(WebSocket受信)で共通の環境変数。
+x-marina-env: &marina-env
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-anthropic.claude-sonnet-5}
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+  DB_DSN: "marina:marina@tcp(mysql:3306)/marina?parseTime=true&loc=Local"
+  BEDROCK_REGION: ${BEDROCK_REGION:-us-east-1}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+  GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
+  GOOGLE_IMPERSONATED_USER: ${GOOGLE_IMPERSONATED_USER:-}
+  MF_CLIENT_ID: ${MF_CLIENT_ID:-}
+  MF_CLIENT_SECRET: ${MF_CLIENT_SECRET:-}
+  MF_OAUTH_REDIRECT_URI: ${MF_OAUTH_REDIRECT_URI:-}
+  MORNING_DIGEST_SLACK_CHANNEL: ${MORNING_DIGEST_SLACK_CHANNEL:-}
+  SLACK_USER_OAUTH_TOKEN: ${SLACK_USER_OAUTH_TOKEN:-}
+  SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+  PROXY_REPLY_TARGET_USER_ID: ${PROXY_REPLY_TARGET_USER_ID:-}
+  PROXY_REPLY_CHANNEL_IDS: ${PROXY_REPLY_CHANNEL_IDS:-}
+  PROXY_REPLY_INCLUDE_DM: ${PROXY_REPLY_INCLUDE_DM:-true}
+
 services:
   mysql:
     image: mysql:8
@@ -44,21 +66,27 @@ services:
     ports:
       - "8091:8080"
     environment:
+      <<: *marina-env
       PORT: "8080"
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-anthropic.claude-sonnet-5}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
-      DB_DSN: "marina:marina@tcp(mysql:3306)/marina?parseTime=true&loc=Local"
-      BEDROCK_REGION: ${BEDROCK_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      GOOGLE_SERVICE_ACCOUNT_JSON: ${GOOGLE_SERVICE_ACCOUNT_JSON:-}
-      GOOGLE_IMPERSONATED_USER: ${GOOGLE_IMPERSONATED_USER:-}
-      MF_CLIENT_ID: ${MF_CLIENT_ID:-}
-      MF_CLIENT_SECRET: ${MF_CLIENT_SECRET:-}
-      MF_OAUTH_REDIRECT_URI: ${MF_OAUTH_REDIRECT_URI:-}
-      MORNING_DIGEST_SLACK_CHANNEL: ${MORNING_DIGEST_SLACK_CHANNEL:-}
+
+  # Socket Mode(WebSocket)でイベント/ボタン押下を受信する常駐プロセス。
+  # 公開URLが不要なため、ngrokなしでローカル検証できます。
+  # `docker compose --env-file .env --profile socketmode up --build socketmode` で起動します。
+  socketmode:
+    build:
+      context: .
+      args:
+        CMD: socketmode
+    profiles:
+      - socketmode
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *marina-env
 
 volumes:
   mysql_data:
