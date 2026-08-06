@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -54,7 +55,13 @@ type Config struct {
 }
 
 // Load は環境変数からConfigを構築します。必須項目が欠けている場合はerrorを返します。
+// MARINA_SECRET_ID / DB_SECRET_ID が設定されている場合(Lambda上の想定)は、
+// 先にSecrets Managerの値を環境変数へ展開します。未設定なら何もしません。
 func Load() (*Config, error) {
+	if err := LoadSecretsIntoEnv(context.Background()); err != nil {
+		return nil, fmt.Errorf("load secrets: %w", err)
+	}
+
 	cfg := &Config{
 		AnthropicModel:            getEnvDefault("ANTHROPIC_MODEL", "anthropic.claude-sonnet-5"),
 		SlackBotToken:             os.Getenv("SLACK_BOT_TOKEN"),

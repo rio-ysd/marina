@@ -129,6 +129,19 @@ func New(cfg *config.Config) (*App, error) {
 	}, nil
 }
 
+// HandleAsyncRequest は受信Lambdaから非同期invokeされたSlackリクエストを同期的に処理します。
+// ワーカーLambda(cmd/eventworker)から呼ばれます。
+func (a *App) HandleAsyncRequest(req slack.AsyncRequest) error {
+	switch req.Kind {
+	case slack.AsyncKindEvents:
+		return a.SlackHandler.HandleEventPayload([]byte(req.Body))
+	case slack.AsyncKindInteractions:
+		return a.InteractionHandler.HandleInteractionPayload([]byte(req.Body))
+	default:
+		return fmt.Errorf("unknown async request kind %q", req.Kind)
+	}
+}
+
 // resolveProxyReplyTarget は代理返信フローの対象ユーザーIDとUser OAuthトークンのクライアントを返します。
 // 代理返信できるのはトークンの持ち主本人だけなので、auth.testで実際の持ち主を確認し、
 // PROXY_REPLY_TARGET_USER_IDと食い違う場合は誤った相手として投稿しないよう機能を無効化します。

@@ -10,7 +10,9 @@ Function Callingツールとして提供します。
 - `cmd/lambda` — AWS Lambda用エントリポイント (API Gateway経由でSlack Events APIを受信)
 - `cmd/morningdigest` — 毎朝9時のGmailダイジェスト用Lambdaエントリポイント (EventBridge Schedulerから起動)
 - `cmd/reminderworker` — 未送信リマインダーをSlackへ送信するLambdaエントリポイント (EventBridge Schedulerから数分おきに起動)
+- `cmd/eventworker` — Slackイベント/ボタン押下の実処理を行うLambdaエントリポイント (`cmd/lambda`から非同期invoke)
 - `cmd/socketmode` — Socket Mode(WebSocket)でイベント/ボタン押下を受信する常駐エントリポイント (公開URL不要、Lambda不可)
+- `infra` — AWS CDK(TypeScript)によるインフラ定義
 - `internal/agent` — Claude(Tool Useループ)
 - `internal/bedrockclient` — Amazon Bedrock経由でAnthropicクライアントを構築
 - `internal/tools` — タスク/リマインダー/Gmail/MoneyForward請求書のFunction Calling定義
@@ -96,14 +98,17 @@ Socket ModeはWebSocketを張り続ける常駐プロセスのため、Lambdaで
 - Signing Secret / Bot User OAuth Token を `.env` の `SLACK_SIGNING_SECRET` / `SLACK_BOT_TOKEN` に設定
 - User OAuth Token (`xoxp-`) を `.env` の `SLACK_USER_OAUTH_TOKEN` に設定
 
-## 本番(AWS)構成の想定
+## 本番(AWS)構成
 
-- API Gateway (HTTP API) → `cmd/lambda` : Slack Events API受信
-- EventBridge Scheduler (平日9:00 JST) → `cmd/morningdigest` : Gmail朝チェック
-- EventBridge Scheduler (数分おき) → `cmd/reminderworker` : リマインダー送信
-- RDS (MySQL) : タスク/リマインダー/会話履歴/OAuthトークンの永続化
+- API Gateway (HTTP API) → `cmd/lambda` : Slack Events API / Interactivity受信(署名検証とackのみ)
+- `cmd/lambda` → `cmd/eventworker` を非同期invoke : Claude呼び出しとSlackへの投稿
+- EventBridge (平日9:00 JST) → `cmd/morningdigest` : Gmail朝チェック
+- EventBridge (5分おき) → `cmd/reminderworker` : リマインダー送信
+- RDS (MySQL) : タスク/リマインダー/会話履歴/OAuthトークン/返信下書きの永続化
+- Secrets Manager : Slackトークン等の設定値とDB認証情報
 
-Lambda/API Gateway/EventBridge Scheduler/RDSのIaC構築は本リポジトリのスコープ外です。
+インフラは [infra/](infra/) の AWS CDK で定義し、`main`へのpushで GitHub Actions がデプロイします。
+手順・費用・トラブルシューティングは [docs/deploy.md](docs/deploy.md) を参照してください。
 
 ## ビルド
 

@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 同時デプロイを避ける(CloudFormationのスタック更新が競合するため)。
+concurrency:
+  group: deploy-marina
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDCでAWSロールを引き受けるために必要
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  MIGRATE_VERSION: v4.18.1
+
+jobs:
+  deploy:
+    name: Build & deploy (CDK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+      - name: build lambda artifacts
+        run: ./scripts/build-lambdas.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+        working-directory: infra
+
+      - name: configure aws credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: cdk deploy
+        run: npm run deploy -- MarinaStack --require-approval never
+        working-directory: infra
+
+      - name: install golang-migrate
+        run: go install -tags mysql github.com/golang-migrate/migrate/v4/cmd/migrate@${{ env.MIGRATE_VERSION }}
+
+      # RDSはパブリック公開しているため、GitHub Actionsのランナーから直接マイグレーションを流せる。
+      - name: run migrations
+        run: |
+          secret=$(aws secretsmanager get-secret-value --secret-id marina/db --query SecretString --output text)
+          host=$(jq -r '.host' <<<"${secret}")
+          port=$(jq -r '.port // 3306' <<<"${secret}")
+          user=$(jq -r '.username' <<<"${secret}")
+          dbname=$(jq -r '.dbname // "marina"' <<<"${secret}")
+          password=$(jq -rn --argjson s "${secret}" '$s.password|@uri')
+          echo "::add-mask::${password}"
+          migrate -path migrations \
+            -database "mysql://${user}:${password}@tcp(${host}:${port})/${dbname}?tls=skip-verify" up
+
+      - name: summary
+        run: |
+          endpoint=$(aws cloudformation describe-stacks --stack-name MarinaStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiEndpoint'].OutputValue" --output text)
+          {
+            echo "## marina deployed"
+            echo ""
+            echo "| 用途 | URL |"
+            echo "|---|---|"
+            echo "| Event Subscriptions | ${endpoint}/slack/events |"
+            echo "| Interactivity | ${endpoint}/slack/interactions |"
+            echo "| MoneyForward OAuth | ${endpoint}/mf/oauth/start |"
+          } >> "${GITHUB_STEP_SUMMARY}"

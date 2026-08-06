@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -52,6 +53,26 @@ func (h *InteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	go h.HandleInteraction(callback)
+}
+
+// HandleInteractionPayload はInteractivityの生リクエストボディ(application/x-www-form-urlencoded)を
+// 同期的に処理します。Lambdaではハンドラのreturn後にgoroutineが凍結されるため、
+// ワーカーLambda側からこの関数で処理を完了させます(署名検証は受信側で済ませてから呼び出します)。
+func (h *InteractionHandler) HandleInteractionPayload(body []byte) error {
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return fmt.Errorf("parse form: %w", err)
+	}
+	payload := values.Get("payload")
+	if payload == "" {
+		return fmt.Errorf("payload is empty")
+	}
+	var callback slack.InteractionCallback
+	if err := json.Unmarshal([]byte(payload), &callback); err != nil {
+		return fmt.Errorf("parse payload: %w", err)
+	}
+	h.HandleInteraction(callback)
+	return nil
 }
 
 // HandleInteraction はパース済みのInteractivityペイロードを処理します。

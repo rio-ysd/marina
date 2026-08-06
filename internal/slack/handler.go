@@ -280,6 +280,36 @@ func verifyErrorStatus(err error) int {
 	return http.StatusBadRequest
 }
 
+// HandleEventPayload はEvents APIの生ペイロードを同期的に処理します。
+// Lambdaではハンドラのreturn後にgoroutineが凍結されるため、ワーカーLambda側から
+// この関数で処理を完了させます(署名検証は受信側のLambdaで済ませてから呼び出します)。
+func (h *Handler) HandleEventPayload(payload []byte) error {
+	event, err := slackevents.ParseEvent(json.RawMessage(payload), slackevents.OptionNoVerifyToken())
+	if err != nil {
+		return fmt.Errorf("parse event: %w", err)
+	}
+	if event.Type != slackevents.CallbackEvent {
+		return nil
+	}
+	h.HandleEvent(event, ParseEventAuthorizations(payload))
+	return nil
+}
+
+// VerifySignature はSlackの署名ヘッダーを検証します。受信したボディをそのまま渡してください。
+func VerifySignature(header http.Header, body []byte, signingSecret string) error {
+	verifier, err := slack.NewSecretsVerifier(header, signingSecret)
+	if err != nil {
+		return fmt.Errorf("create verifier: %w", err)
+	}
+	if _, err := verifier.Write(body); err != nil {
+		return fmt.Errorf("write body: %w", err)
+	}
+	if err := verifier.Ensure(); err != nil {
+		return fmt.Errorf("invalid signature: %w", err)
+	}
+	return nil
+}
+
 // verifyRequest はSlackからのリクエストの署名を検証し、リクエストボディを返します。
 func verifyRequest(r *http.Request, signingSecret string) ([]byte, error) {
 	body, err := io.ReadAll(r.Body)
