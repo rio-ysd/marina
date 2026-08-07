@@ -1,0 +1,22 @@
+{
+  "name": "marina-infra",
+  "version": "0.1.0",
+  "private": true,
+  "//": "aws-cdk(CLI)はdevDependenciesに入れない。node_modulesにGoのテンプレートファイル(%name%.template.go)が含まれ、リポジトリ全体の go build ./... と gofmt が失敗するため、npx でバージョン固定して呼ぶ。",
+  "scripts": {
+    "cdk": "npx -y aws-cdk@2.1135.0",
+    "synth": "npm run cdk -- synth",
+    "deploy": "npm run cdk -- deploy",
+    "diff": "npm run cdk -- diff",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.7.2"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.230.0",
+    "constructs": "^10.4.2"
+  }
+}

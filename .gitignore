@@ -1,5 +1,8 @@
 .env
-bin/
+/bin/
 gkey.json
 *.pem
 *.key
+dist/
+infra/node_modules/
+infra/cdk.out/

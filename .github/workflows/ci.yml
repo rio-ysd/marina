@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  go:
+    name: Go (vet / test / build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "gofmt needed for:"
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - run: go test ./...
+
+      - name: build lambda artifacts
+        run: ./scripts/build-lambdas.sh
+
+  infra:
+    name: CDK (typecheck / synth)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - run: npm ci
+        working-directory: infra
+
+      - run: npm run typecheck
+        working-directory: infra
+
+      # LambdaのコードアセットはCDKのsynth時に存在が必要。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: ./scripts/build-lambdas.sh
+
+      # AWS認証情報なしでsynthするため、コミット済みのcdk.context.json(AZ一覧)を使う。
+      # アカウント/リージョンはbin/marina.tsの既定値と一致させる必要があるので上書きしない。
+      - run: npm run synth -- --quiet
+        working-directory: infra
