@@ -23,7 +23,15 @@ export class GithubOidcStack extends cdk.Stack {
       clientIds: ['sts.amazonaws.com'],
     });
 
-    // mainブランチと手動実行(workflow_dispatch)のみを許可する。
+    // 許可するsubクレーム。GitHubは環境によって2つの形式を送ってくるため両方に対応する。
+    //   従来形式  : repo:<owner>/<repo>:ref:refs/heads/main
+    //   immutable : repo:<owner>@<owner_id>/<repo>@<repo_id>:ref:refs/heads/main
+    // デプロイはmainブランチからのみ許可する(PRブランチからロールを引き受けられないようにするため)。
+    const subjectPatterns = [
+      `repo:${props.githubOwner}/${props.githubRepo}:ref:refs/heads/main`,
+      `repo:${props.githubOwner}@*/${props.githubRepo}@*:ref:refs/heads/main`,
+    ];
+
     const role = new iam.Role(this, 'DeployRole', {
       roleName: 'marina-github-actions-deploy',
       description: 'Assumed by GitHub Actions to deploy marina via CDK',
@@ -33,7 +41,7 @@ export class GithubOidcStack extends cdk.Stack {
           'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
         },
         StringLike: {
-          'token.actions.githubusercontent.com:sub': `repo:${props.githubOwner}/${props.githubRepo}:*`,
+          'token.actions.githubusercontent.com:sub': subjectPatterns,
         },
       }),
     });
