@@ -59,8 +59,7 @@ jobs:
 
       - run: ./scripts/build-lambdas.sh
 
+      # AWS認証情報なしでsynthするため、コミット済みのcdk.context.json(AZ一覧)を使う。
+      # アカウント/リージョンはbin/marina.tsの既定値と一致させる必要があるので上書きしない。
       - run: npm run synth -- --quiet
         working-directory: infra
-        env:
-          CDK_DEFAULT_ACCOUNT: '000000000000'
-          CDK_DEFAULT_REGION: ap-northeast-1
