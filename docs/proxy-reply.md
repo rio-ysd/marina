@@ -14,7 +14,7 @@ Yesが押されたら**本人のアカウントとして**返信を投稿しま�
 3. スレッドの文脈を取得し、Claudeが「本人として返す返信案」を生成する
    ([internal/agent/draft.go](../internal/agent/draft.go))
 4. 下書きを`reply_drafts`テーブルにpendingで保存し、対象ユーザーへ確認DMを送る
-   (Yes/Noボタン付き、[internal/proxyreply/proxyreply.go](../internal/proxyreply/proxyreply.go))
+   (Yes/Noボタン + 元メッセージへのリンク付き、[internal/proxyreply/proxyreply.go](../internal/proxyreply/proxyreply.go))
 5. 本人が **Yes** を押すとInteractivityのペイロードが届き、User OAuthトークン(`xoxp-`)で
    元のチャンネル(またはDM)のスレッドへ投稿する(=本人の発言として表示される)
 6. 確認DMはボタンなしの結果表示(送信済み/取りやめ)に差し替えられる。**No** の場合は投稿せずrejectedで終了する
@@ -103,6 +103,8 @@ Socket Modeでは署名検証(`SLACK_SIGNING_SECRET`)は使われませんが、
 - 返信は元メッセージのスレッドに投稿されます(スレッド外のメンションの場合は、そのメッセージのスレッドになります)
 - Yes/Noの判定は`reply_drafts.status`の`pending`→`approved`/`rejected`の条件付きUPDATEで排他制御しており、
   ボタン連打やSlackのイベント再送でも二重送信されません
+- 確認DMには元メッセージへのパーマリンク(`chat.getPermalink`)を付けています。**No**で取りやめた場合も
+  自分で対応できるようリンクを残します
 - 投稿に失敗した場合はstatusをpendingへ戻し、確認DMにエラーを表示します(もう一度Yesを押せます)
 - ボタンを押せるのは対象ユーザー本人のみです(`callback.User.ID`と`PROXY_REPLY_TARGET_USER_ID`を照合)
 

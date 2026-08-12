@@ -166,7 +166,14 @@ func (s *Service) HandleMessage(ctx context.Context, msg IncomingMessage) error 
 	fallback := fmt.Sprintf("%s さんへの返信案の確認です", requesterName)
 	_, ts, err := s.botClient.PostMessageContext(ctx, dmChannel,
 		slack.MsgOptionText(fallback, false),
-		slack.MsgOptionBlocks(s.approvalBlocks(draftID, msg.User, msg.Channel, requestText, draft, "")...),
+		slack.MsgOptionBlocks(s.approvalBlocks(approvalView{
+			DraftID:       draftID,
+			RequesterUser: msg.User,
+			Channel:       msg.Channel,
+			RequestText:   requestText,
+			Draft:         draft,
+			Permalink:     s.permalink(ctx, msg.Channel, msg.MessageTS),
+		})...),
 	)
 	if err != nil {
 		return fmt.Errorf("post approval dm: %w", err)
@@ -223,8 +230,15 @@ func (s *Service) approve(ctx context.Context, draftID int64, a Action) error {
 			log.Printf("proxyreply: release draft %d failed: %v", draftID, relErr)
 		}
 		notice := fmt.Sprintf(":warning: 送信に失敗しました(%v)。もう一度Yesを押すと再送信します。", err)
-		s.updateApprovalMessage(ctx, a, notice,
-			s.approvalBlocks(draftID, draft.RequesterUser, draft.SourceChannel, draft.RequestText, draft.DraftText, notice))
+		s.updateApprovalMessage(ctx, a, notice, s.approvalBlocks(approvalView{
+			DraftID:       draftID,
+			RequesterUser: draft.RequesterUser,
+			Channel:       draft.SourceChannel,
+			RequestText:   draft.RequestText,
+			Draft:         draft.DraftText,
+			Permalink:     s.permalink(ctx, draft.SourceChannel, draft.SourceMessageTS),
+			Notice:        notice,
+		}))
 		return fmt.Errorf("post as user: %w", err)
 	}
 
@@ -255,29 +269,49 @@ func (s *Service) reject(ctx context.Context, draftID int64, a Action) error {
 		return fmt.Errorf("get draft %d: %w", draftID, err)
 	}
 
+	// 自分で返信できるよう、元メッセージへのリンクを残す。
 	status := ":no_entry_sign: 送信を取りやめました。返信が必要な場合はご自身で対応してください。"
+	if link := s.permalink(ctx, draft.SourceChannel, draft.SourceMessageTS); link != "" {
+		status += fmt.Sprintf("\n<%s|元のメッセージを開く>", link)
+	}
 	s.updateApprovalMessage(ctx, a, status, resultBlocks(draft.DraftText, status))
 	return nil
 }
 
+// approvalView は確認DMの表示に必要な値です。
+type approvalView struct {
+	DraftID       int64
+	RequesterUser string
+	Channel       string
+	RequestText   string
+	Draft         string
+	// Permalink は元メッセージへのリンク。取得できなかった場合は空。
+	Permalink string
+	// Notice は空でなければ先頭に表示する注意書き(送信失敗時など)。
+	Notice string
+}
+
 // approvalBlocks はYes/Noボタン付きの確認DMのBlock Kitを組み立てます。
-// requestTextはメンション解決済みの元メッセージ、noticeは空でなければ先頭に表示する注意書きです。
-func (s *Service) approvalBlocks(draftID int64, requesterUser, channel, requestText, draft, notice string) []slack.Block {
+func (s *Service) approvalBlocks(v approvalView) []slack.Block {
 	blocks := make([]slack.Block, 0, 6)
-	if notice != "" {
-		blocks = append(blocks, mrkdwnSection(notice))
+	if v.Notice != "" {
+		blocks = append(blocks, mrkdwnSection(v.Notice))
 	}
-	header := fmt.Sprintf("<@%s> さんから <#%s> でメンションがありました。以下の内容で返信しますか?", requesterUser, channel)
-	if isDMChannel(channel) {
-		header = fmt.Sprintf("<@%s> さんからDMが届きました。以下の内容で返信しますか?", requesterUser)
+	header := fmt.Sprintf("<@%s> さんから <#%s> でメンションがありました。以下の内容で返信しますか?", v.RequesterUser, v.Channel)
+	if isDMChannel(v.Channel) {
+		header = fmt.Sprintf("<@%s> さんからDMが届きました。以下の内容で返信しますか?", v.RequesterUser)
+	}
+	originalHeading := "*元のメッセージ*"
+	if v.Permalink != "" {
+		originalHeading += fmt.Sprintf(" <%s|Slackで開く>", v.Permalink)
 	}
 	return append(blocks,
 		mrkdwnSection(header),
-		mrkdwnSection("*元のメッセージ*\n"+blockquote(requestText)),
-		mrkdwnSection("*返信案*\n"+truncate(draft, maxDisplayTextLen)),
-		slack.NewActionBlock(fmt.Sprintf("proxy_reply_%d", draftID),
-			buttonElement(ActionApprove, draftID, "Yes(この内容で送信)", slack.StylePrimary),
-			buttonElement(ActionReject, draftID, "No(送信しない)", slack.StyleDanger),
+		mrkdwnSection(originalHeading+"\n"+blockquote(v.RequestText)),
+		mrkdwnSection("*返信案*\n"+truncate(v.Draft, maxDisplayTextLen)),
+		slack.NewActionBlock(fmt.Sprintf("proxy_reply_%d", v.DraftID),
+			buttonElement(ActionApprove, v.DraftID, "Yes(この内容で送信)", slack.StylePrimary),
+			buttonElement(ActionReject, v.DraftID, "No(送信しない)", slack.StyleDanger),
 		),
 		slack.NewContextBlock("",
 			slack.NewTextBlockObject(slack.MarkdownType,

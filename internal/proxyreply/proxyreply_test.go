@@ -1,7 +1,9 @@
 package proxyreply
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -133,4 +135,55 @@ func TestBlockquote(t *testing.T) {
 	if got := blockquote("1行目\n2行目"); got != "> 1行目\n> 2行目" {
 		t.Errorf("blockquote() = %q", got)
 	}
+}
+
+func TestApprovalBlocksIncludesPermalink(t *testing.T) {
+	s := newTestService(Config{})
+	blocks := s.approvalBlocks(approvalView{
+		DraftID:       42,
+		RequesterUser: "U999",
+		Channel:       "C111",
+		RequestText:   "見積書の件どうなってますか?",
+		Draft:         "確認して本日中にお送りします。",
+		Permalink:     "https://devenue.slack.com/archives/C111/p1786500179076929",
+	})
+
+	rendered := renderBlocks(t, blocks)
+	for _, want := range []string{
+		"<https://devenue.slack.com/archives/C111/p1786500179076929|Slackで開く>",
+		"*元のメッセージ*",
+		"> 見積書の件どうなってますか?",
+		"*返信案*",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("approval message missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestApprovalBlocksWithoutPermalink(t *testing.T) {
+	s := newTestService(Config{})
+	blocks := s.approvalBlocks(approvalView{DraftID: 1, RequesterUser: "U999", Channel: "C111", RequestText: "本文", Draft: "返信案"})
+
+	rendered := renderBlocks(t, blocks)
+	// リンクが取れなかった場合は見出しだけを出し、空リンクを描画しないこと。
+	if strings.Contains(rendered, "|Slackで開く>") {
+		t.Errorf("unexpected empty permalink link:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, `*元のメッセージ*\n> 本文`) {
+		t.Errorf("original message section malformed:\n%s", rendered)
+	}
+}
+
+// renderBlocks はBlock KitをJSONに落として文字列として検証できるようにします。
+// SetEscapeHTML(false)にしないと`<`が\u003cへエスケープされ、リンク記法を検証できません。
+func renderBlocks(t *testing.T, blocks []slack.Block) string {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(blocks); err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	return buf.String()
 }
