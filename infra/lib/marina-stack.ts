@@ -134,9 +134,21 @@ export class MarinaStack extends cdk.Stack {
     };
 
     // Claude(Bedrock)を呼ぶ関数に付与する権限。
+    // anthropic-sdk-goのbedrock.NewMantleClientはMessages APIのエンドポイント
+    // (bedrock-mantle.<region>.api.aws/anthropic/v1/messages)を叩くため、
+    // 旧InvokeModel方式の bedrock:InvokeModel ではなく bedrock-mantle:CreateInference が必要。
+    // 認可対象にはリージョン内のプロジェクト(project/default)とモデルの両方が含まれるため、
+    // アカウント配下とアカウント非依存の両方のARNを許可する。
     const bedrockPolicy = new iam.PolicyStatement({
-      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+      actions: [
+        'bedrock-mantle:CreateInference',
+        // 旧InvokeModel方式に切り替えた場合に備えて残す(モデルIDにinference profileを指定する構成)。
+        'bedrock:InvokeModel',
+        'bedrock:InvokeModelWithResponseStream',
+      ],
       resources: [
+        `arn:aws:bedrock-mantle:*:${this.account}:*`,
+        'arn:aws:bedrock-mantle:*::*',
         'arn:aws:bedrock:*::foundation-model/*',
         `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
       ],
