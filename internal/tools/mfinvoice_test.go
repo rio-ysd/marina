@@ -65,7 +65,7 @@ func TestListInvoicesSendsRangeKeyAndParsesTotalCount(t *testing.T) {
 		_, _ = w.Write([]byte(billingsResponse))
 	})
 
-	list, err := client.ListInvoices(context.Background(), "2026-08-01", "2026-08-31", 20)
+	list, err := client.ListInvoices(context.Background(), "", "2026-08-01", "2026-08-31", 20)
 	if err != nil {
 		t.Fatalf("ListInvoices() error: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestListEstimatesUsesQuoteDateRangeKey(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"q1","quote_number":"229","quote_date":"2026/08/03","order_status":"default"}],"pagination":{"total_count":26}}`))
 	})
 
-	list, err := client.ListEstimates(context.Background(), "2026-08-01", "2026-08-31", 0)
+	list, err := client.ListEstimates(context.Background(), "", "2026-08-01", "2026-08-31", 0)
 	if err != nil {
 		t.Fatalf("ListEstimates() error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestListInvoicesDefaultsToCurrentMonth(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total_count":0}}`))
 	})
 
-	if _, err := client.ListInvoices(context.Background(), "", "", 0); err != nil {
+	if _, err := client.ListInvoices(context.Background(), "", "", "", 0); err != nil {
 		t.Fatalf("ListInvoices() error: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestListInvoicesAcceptsNumericAndStringNumbers(t *testing.T) {
 		],"pagination":{"total_count":3}}`))
 	})
 
-	list, err := client.ListInvoices(context.Background(), "2026-08-01", "2026-08-31", 20)
+	list, err := client.ListInvoices(context.Background(), "", "2026-08-01", "2026-08-31", 20)
 	if err != nil {
 		t.Fatalf("ListInvoices() error: %v", err)
 	}
@@ -164,6 +164,67 @@ func TestListInvoicesAcceptsNumericAndStringNumbers(t *testing.T) {
 		if got.Number != w.number || got.TotalPrice != w.price {
 			t.Errorf("doc[%d] = number %d / price %.0f, want %d / %.0f", i, got.Number, got.TotalPrice, w.number, w.price)
 		}
+	}
+}
+
+// 支払期限(due_date)で絞れること。日付基準は結果にも残す。
+func TestListInvoicesByDueDate(t *testing.T) {
+	var gotQuery url.Values
+	client, _ := newTestInvoiceClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total_count":12}}`))
+	})
+
+	list, err := client.ListInvoices(context.Background(), "due_date", "2026-08-01", "2026-09-30", 20)
+	if err != nil {
+		t.Fatalf("ListInvoices() error: %v", err)
+	}
+	if got := gotQuery.Get("range_key"); got != "due_date" {
+		t.Errorf("range_key = %q, want due_date", got)
+	}
+	if list.DateType != "due_date" {
+		t.Errorf("DateType = %q, want due_date", list.DateType)
+	}
+	if got := formatDocumentList("請求書", list); !strings.Contains(got, "請求書(支払期限)") {
+		t.Errorf("結果に日付基準が出ていない: %s", got)
+	}
+}
+
+// 未対応の値をそのまま渡すとAPIが422を返すため、既定値に落とす。
+func TestListInvoicesRejectsUnsupportedDateType(t *testing.T) {
+	var gotQuery url.Values
+	client, _ := newTestInvoiceClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total_count":0}}`))
+	})
+
+	if _, err := client.ListInvoices(context.Background(), "bogus_key", "2026-08-01", "2026-08-31", 20); err != nil {
+		t.Fatalf("ListInvoices() error: %v", err)
+	}
+	if got := gotQuery.Get("range_key"); got != "billing_date" {
+		t.Errorf("range_key = %q, want billing_date (未対応値は既定に落とす)", got)
+	}
+}
+
+func TestListEstimatesByExpiredDate(t *testing.T) {
+	var gotQuery url.Values
+	client, _ := newTestInvoiceClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total_count":2}}`))
+	})
+
+	if _, err := client.ListEstimates(context.Background(), "expired_date", "2026-08-01", "2026-09-30", 20); err != nil {
+		t.Fatalf("ListEstimates() error: %v", err)
+	}
+	if got := gotQuery.Get("range_key"); got != "expired_date" {
+		t.Errorf("range_key = %q, want expired_date", got)
+	}
+	// 見積書に請求書用の値を渡した場合も既定へ落とす。
+	if _, err := client.ListEstimates(context.Background(), "due_date", "", "", 0); err != nil {
+		t.Fatalf("ListEstimates() error: %v", err)
+	}
+	if got := gotQuery.Get("range_key"); got != "quote_date" {
+		t.Errorf("range_key = %q, want quote_date", got)
 	}
 }
 

@@ -96,9 +96,30 @@ type DocumentSummary struct {
 	PDFURL string `json:"pdf_url"`
 }
 
+// dateTypeLabel は日付基準を日本語ラベルにします。どの日付で絞ったかが分からないと
+// 「今月の請求書」と「今月が支払期限の請求書」を取り違えるため、結果に明示します。
+func dateTypeLabel(dateType string) string {
+	switch dateType {
+	case "due_date":
+		return "支払期限"
+	case "sales_date":
+		return "売上日"
+	case "created_at":
+		return "作成日"
+	case "expired_date":
+		return "有効期限"
+	case "quote_date":
+		return "見積日"
+	default:
+		return "請求日"
+	}
+}
+
 // DocumentList は一覧取得の結果です。TotalCountは期間内の総件数で、
 // Documentsは上限(limit)までの明細なので、件数だけを聞かれた場合はTotalCountを使います。
 type DocumentList struct {
+	// DateType は絞り込みに使った日付の種類(billing_date / due_date など)です。
+	DateType   string            `json:"date_type"`
 	From       string            `json:"from"`
 	To         string            `json:"to"`
 	TotalCount int               `json:"total_count"`
@@ -109,10 +130,11 @@ type DocumentList struct {
 type MFInvoiceClient interface {
 	// ListPartners は取引先を名前で検索します(部分一致)。空文字の場合は全件を返します。
 	ListPartners(ctx context.Context, name string) ([]Partner, error)
-	// ListInvoices は請求日がfrom〜toの範囲にある請求書を返します(日付はYYYY-MM-DD、空なら今月)。
-	ListInvoices(ctx context.Context, from, to string, limit int) (DocumentList, error)
-	// ListEstimates は見積日がfrom〜toの範囲にある見積書を返します。
-	ListEstimates(ctx context.Context, from, to string, limit int) (DocumentList, error)
+	// ListInvoices はdateType(請求日/支払期限など)がfrom〜toの範囲にある請求書を返します。
+	// 日付はYYYY-MM-DD、空なら今月。dateTypeが空なら請求日(billing_date)基準です。
+	ListInvoices(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error)
+	// ListEstimates はdateType(見積日/有効期限)がfrom〜toの範囲にある見積書を返します。
+	ListEstimates(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error)
 	// CreateEstimate はdepartmentID(取引先の部署ID、ListPartnersで取得)宛の見積書を作成します。
 	CreateEstimate(ctx context.Context, departmentID, quoteDate, expiredDate string, items []InvoiceItem) (InvoiceDocument, error)
 	// CreateInvoice はdepartmentID宛の請求書を作成します。
@@ -124,13 +146,13 @@ type MockMFInvoiceClient struct{}
 
 func NewMockMFInvoiceClient() *MockMFInvoiceClient { return &MockMFInvoiceClient{} }
 
-func (m *MockMFInvoiceClient) ListInvoices(ctx context.Context, from, to string, limit int) (DocumentList, error) {
-	log.Printf("[MockMFInvoiceClient] ListInvoices(from=%s, to=%s) called (MF認証情報が未設定のためモック応答)", from, to)
+func (m *MockMFInvoiceClient) ListInvoices(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error) {
+	log.Printf("[MockMFInvoiceClient] ListInvoices(dateType=%s, from=%s, to=%s) called (MF認証情報が未設定のためモック応答)", dateType, from, to)
 	return mockDocumentList(from, to, "請求書"), nil
 }
 
-func (m *MockMFInvoiceClient) ListEstimates(ctx context.Context, from, to string, limit int) (DocumentList, error) {
-	log.Printf("[MockMFInvoiceClient] ListEstimates(from=%s, to=%s) called (MF認証情報が未設定のためモック応答)", from, to)
+func (m *MockMFInvoiceClient) ListEstimates(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error) {
+	log.Printf("[MockMFInvoiceClient] ListEstimates(dateType=%s, from=%s, to=%s) called (MF認証情報が未設定のためモック応答)", dateType, from, to)
 	return mockDocumentList(from, to, "見積書"), nil
 }
 
@@ -270,22 +292,33 @@ func NewMFInvoiceTools(client MFInvoiceClient) ([]anthropic.BetaTool, error) {
 		return nil, err
 	}
 
-	listRangeSchema := mustSchema(map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"from":  map[string]any{"type": "string", "description": "期間の開始日(YYYY-MM-DD)。省略時は今月の初日"},
-			"to":    map[string]any{"type": "string", "description": "期間の終了日(YYYY-MM-DD)。省略時は今月の末日"},
-			"limit": map[string]any{"type": "integer", "description": "一覧に含める最大件数(既定20、最大100)。件数だけ知りたい場合も総件数は別途返る"},
-		},
-	})
+	listRangeSchema := func(dateTypeDescription string, dateTypes []string) []byte {
+		return mustSchema(map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"date_type": map[string]any{
+					"type":        "string",
+					"description": dateTypeDescription,
+					"enum":        dateTypes,
+				},
+				"from":  map[string]any{"type": "string", "description": "期間の開始日(YYYY-MM-DD)。省略時は今月の初日"},
+				"to":    map[string]any{"type": "string", "description": "期間の終了日(YYYY-MM-DD)。省略時は今月の末日"},
+				"limit": map[string]any{"type": "integer", "description": "一覧に含める最大件数(既定20、最大100)。件数だけ知りたい場合も総件数は別途返る"},
+			},
+		})
+	}
 
 	listInvoicesTool, err := toolrunner.NewBetaToolFromBytes[listDocumentsInput](
 		"mf_list_invoices",
 		"MoneyForwardクラウド請求書の請求書を期間で検索し、総件数と一覧を返す。"+
-			"「今月の請求書は何通か」「先月の請求書一覧」等に使う。請求日(billing_date)が期間内のものが対象。",
-		listRangeSchema,
+			"「今月の請求書は何通か」「今月末が支払期限の請求書」等に使う。"+
+			"date_typeで日付の基準を選べる(既定は請求日)。支払期限で絞るならdue_dateを指定する。",
+		listRangeSchema(
+			"日付の基準。billing_date=請求日(既定)、due_date=支払期限、sales_date=売上日、created_at=作成日",
+			[]string{"billing_date", "due_date", "sales_date", "created_at"},
+		),
 		func(ctx context.Context, in listDocumentsInput) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-			list, err := client.ListInvoices(ctx, in.From, in.To, in.Limit)
+			list, err := client.ListInvoices(ctx, in.DateType, in.From, in.To, in.Limit)
 			if err != nil {
 				return textResult(""), err
 			}
@@ -298,10 +331,14 @@ func NewMFInvoiceTools(client MFInvoiceClient) ([]anthropic.BetaTool, error) {
 
 	listEstimatesTool, err := toolrunner.NewBetaToolFromBytes[listDocumentsInput](
 		"mf_list_estimates",
-		"MoneyForwardクラウド請求書の見積書を期間で検索し、総件数と一覧を返す。見積日(quote_date)が期間内のものが対象。",
-		listRangeSchema,
+		"MoneyForwardクラウド請求書の見積書を期間で検索し、総件数と一覧を返す。"+
+			"date_typeで日付の基準を選べる(既定は見積日)。有効期限で絞るならexpired_dateを指定する。",
+		listRangeSchema(
+			"日付の基準。quote_date=見積日(既定)、expired_date=有効期限",
+			[]string{"quote_date", "expired_date"},
+		),
 		func(ctx context.Context, in listDocumentsInput) (anthropic.BetaToolResultBlockParamContentUnion, error) {
-			list, err := client.ListEstimates(ctx, in.From, in.To, in.Limit)
+			list, err := client.ListEstimates(ctx, in.DateType, in.From, in.To, in.Limit)
 			if err != nil {
 				return textResult(""), err
 			}
@@ -319,16 +356,18 @@ func NewMFInvoiceTools(client MFInvoiceClient) ([]anthropic.BetaTool, error) {
 }
 
 type listDocumentsInput struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Limit int    `json:"limit"`
+	DateType string `json:"date_type"`
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Limit    int    `json:"limit"`
 }
 
 // formatDocumentList は一覧をClaudeが読みやすいテキストにまとめます。
 // 総件数と表示件数が異なる場合(limitで打ち切った場合)はその旨を明示します。
 func formatDocumentList(kind string, list DocumentList) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "期間: %s〜%s / %s件数: %d件\n", list.From, list.To, kind, list.TotalCount)
+	fmt.Fprintf(&b, "%s(%s): %s〜%s / %s件数: %d件\n",
+		kind, dateTypeLabel(list.DateType), list.From, list.To, kind, list.TotalCount)
 	if list.TotalCount > len(list.Documents) {
 		fmt.Fprintf(&b, "(以下は先頭%d件のみ。総件数は上記の%d件)\n", len(list.Documents), list.TotalCount)
 	}

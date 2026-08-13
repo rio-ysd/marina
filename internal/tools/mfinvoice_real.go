@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -114,12 +115,30 @@ func (n *mfNumber) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (c *RealMFInvoiceClient) ListInvoices(ctx context.Context, from, to string, limit int) (DocumentList, error) {
-	return c.list(ctx, "/billings", "billing_date", from, to, limit)
+// 請求書・見積書それぞれで指定できるrange_key(実APIで確認済み。範囲外の値は422になる)。
+var (
+	invoiceDateTypes  = map[string]bool{"billing_date": true, "due_date": true, "sales_date": true, "created_at": true}
+	estimateDateTypes = map[string]bool{"quote_date": true, "expired_date": true}
+)
+
+func (c *RealMFInvoiceClient) ListInvoices(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error) {
+	return c.list(ctx, "/billings", normalizeDateType(dateType, invoiceDateTypes, "billing_date"), from, to, limit)
 }
 
-func (c *RealMFInvoiceClient) ListEstimates(ctx context.Context, from, to string, limit int) (DocumentList, error) {
-	return c.list(ctx, "/quotes", "quote_date", from, to, limit)
+func (c *RealMFInvoiceClient) ListEstimates(ctx context.Context, dateType, from, to string, limit int) (DocumentList, error) {
+	return c.list(ctx, "/quotes", normalizeDateType(dateType, estimateDateTypes, "quote_date"), from, to, limit)
+}
+
+// normalizeDateType は未対応の日付種別が来た場合に既定値へ落とします。
+// そのまま渡すとAPIが422を返し、ユーザーには理由の分からないエラーになるためです。
+func normalizeDateType(dateType string, allowed map[string]bool, fallback string) string {
+	if allowed[dateType] {
+		return dateType
+	}
+	if dateType != "" {
+		log.Printf("mfinvoice: unsupported date_type %q, falling back to %s", dateType, fallback)
+	}
+	return fallback
 }
 
 // list は請求書/見積書の一覧を取得します。
@@ -140,7 +159,7 @@ func (c *RealMFInvoiceClient) list(ctx context.Context, path, rangeKey, from, to
 		return DocumentList{}, err
 	}
 
-	result := DocumentList{From: from, To: to, TotalCount: resp.Pagination.TotalCount}
+	result := DocumentList{DateType: rangeKey, From: from, To: to, TotalCount: resp.Pagination.TotalCount}
 	for _, item := range resp.Data {
 		summary := DocumentSummary{
 			ID:          item.ID,
