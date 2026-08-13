@@ -69,6 +69,19 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build gmail tools: %w", err)
 	}
 
+	var driveClient tools.DriveClient = tools.NewMockDriveClient()
+	if cfg.HasDriveCredentials() {
+		realDriveClient, err := tools.NewRealDriveClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
+		if err != nil {
+			return nil, fmt.Errorf("build drive client: %w", err)
+		}
+		driveClient = realDriveClient
+	}
+	driveTools, err := tools.NewDriveTools(driveClient)
+	if err != nil {
+		return nil, fmt.Errorf("build drive tools: %w", err)
+	}
+
 	oauthTokenRepo := storage.NewOAuthTokenRepo(db)
 	var mfClient tools.MFInvoiceClient = tools.NewMockMFInvoiceClient()
 	var mfOAuthHandler http.Handler
@@ -82,7 +95,7 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build mf invoice tools: %w", err)
 	}
 
-	allTools := append(append(append(taskTools, reminderTools...), gmailTools...), mfTools...)
+	allTools := append(append(append(append(taskTools, reminderTools...), gmailTools...), driveTools...), mfTools...)
 
 	anthropicClient, err := bedrockclient.New(ctx, cfg)
 	if err != nil {

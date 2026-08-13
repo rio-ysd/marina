@@ -20,7 +20,8 @@ type Config struct {
 	BedrockRegion string
 
 	// GoogleServiceAccountJSON はサービスアカウントの秘密鍵JSON文字列。
-	// 未設定の場合はGmail連携はモッククライアントで動作する。
+	// Gmail連携とGoogle Drive連携で共通に使う。
+	// 未設定の場合はいずれもモッククライアントで動作する。
 	GoogleServiceAccountJSON string
 	// GoogleImpersonatedUser はドメイン委任で代理するユーザーのメールアドレス。
 	GoogleImpersonatedUser string
@@ -103,6 +104,13 @@ func Load() (*Config, error) {
 
 // HasGmailCredentials はGmail連携の実クライアントが利用可能かを返します。
 func (c *Config) HasGmailCredentials() bool {
+	return c.GoogleServiceAccountJSON != "" && c.GoogleImpersonatedUser != ""
+}
+
+// HasDriveCredentials はGoogle Drive連携の実クライアントが利用可能かを返します。
+// 認証情報はGmailと共通ですが、ドメイン委任の許可スコープにDriveスコープを追加する必要があります
+// (未追加の場合は起動には成功し、ツール呼び出し時にunauthorized_clientで失敗します)。
+func (c *Config) HasDriveCredentials() bool {
 	return c.GoogleServiceAccountJSON != "" && c.GoogleImpersonatedUser != ""
 }
 

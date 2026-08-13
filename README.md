@@ -1,8 +1,11 @@
 # marina
 
 Slack上で動く秘書AIエージェント。Claude (Anthropicモデル) をAmazon Bedrock経由で呼び出し、
-タスク管理・リマインダー・雑務相談に応答し、Gmailの朝チェックやMoneyForwardクラウド会計の見積書/請求書作成を
-Function Callingツールとして提供します。
+タスク管理・リマインダー・雑務相談に応答し、Gmailの朝チェック、Google Driveの資料検索、
+MoneyForwardクラウド請求書の見積書/請求書作成をFunction Callingツールとして提供します。
+
+外部サービス連携はすべてFunction Calling(Tool Use)で実装する方針です。実装の作法と新規連携の追加手順は
+[docs/integration-guidelines.md](docs/integration-guidelines.md) にまとめてあります。
 
 ## 構成
 
@@ -15,7 +18,7 @@ Function Callingツールとして提供します。
 - `infra` — AWS CDK(TypeScript)によるインフラ定義
 - `internal/agent` — Claude(Tool Useループ)
 - `internal/bedrockclient` — Amazon Bedrock経由でAnthropicクライアントを構築
-- `internal/tools` — タスク/リマインダー/Gmail/MoneyForward請求書のFunction Calling定義
+- `internal/tools` — タスク/リマインダー/Gmail/Google Drive/MoneyForward請求書のFunction Calling定義
 - `internal/slack` — Slack Events API受信・署名検証・応答送信、Interactivity(ボタン押下)受信
 - `internal/proxyreply` — 本人宛メンションへの返信案作成→DMでYes/No確認→本人として代理返信
 - `internal/mfoauth` — MoneyForwardクラウド請求書API用OAuth2認可コールバック(`/mf/oauth/start`, `/mf/oauth/callback`)
@@ -23,8 +26,16 @@ Function Callingツールとして提供します。
 - `internal/morningdigest` — 朝のGmailダイジェストのロジック
 - `migrations` — golang-migrate用SQLマイグレーション
 
-Gmail連携はGoogle Workspaceサービスアカウント + ドメイン委任(`GmailClient`)、MoneyForward請求書連携は
-OAuth2 authorizationCodeフロー(`MFInvoiceClient`)で実装しています。いずれも認証情報未設定時はモック実装で動作します。
+Gmail連携とGoogle Drive連携はGoogle Workspaceサービスアカウント + ドメイン委任(`GmailClient` / `DriveClient`)、
+MoneyForward請求書連携はOAuth2 authorizationCodeフロー(`MFInvoiceClient`)で実装しています。
+いずれも認証情報未設定時はモック実装で動作します。
+
+Google Drive連携はGmailと同じ認証情報(`GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_IMPERSONATED_USER`)を使い、
+資料の検索(`drive_search_files`)・フォルダ一覧(`drive_list_folder`)・本文の読み取り(`drive_read_file`)・
+Googleドキュメントの作成(`drive_create_document`)を提供します。**ドメイン委任の許可スコープに
+`https://www.googleapis.com/auth/drive` を追加する必要があります**。削除・共有権限の変更は
+誤爆時に戻せないため、意図的にツールとして公開していません。詳細は
+[docs/google-drive.md](docs/google-drive.md) を参照してください。
 
 MoneyForward請求書APIはOAuth2のみをサポートしており、APIキー方式は使えません。初回のみ人間がブラウザで
 `https://<公開ドメイン>/mf/oauth/start` にアクセスして認可する必要がありますが、以降はrefresh_tokenが
