@@ -14,6 +14,7 @@ import (
 
 	"github.com/slack-go/slack"
 
+	"github.com/yoshida-rio/marina/internal/slackfmt"
 	"github.com/yoshida-rio/marina/internal/storage"
 )
 
@@ -221,7 +222,7 @@ func (s *Service) approve(ctx context.Context, draftID int64, a Action) error {
 	}
 
 	_, ts, err := s.userClient.PostMessageContext(ctx, draft.SourceChannel,
-		slack.MsgOptionText(draft.DraftText, false),
+		slack.MsgOptionText(slackfmt.ToMrkdwn(draft.DraftText), false),
 		slack.MsgOptionTS(draft.SourceThreadTS),
 	)
 	if err != nil {
@@ -308,7 +309,7 @@ func (s *Service) approvalBlocks(v approvalView) []slack.Block {
 	return append(blocks,
 		mrkdwnSection(header),
 		mrkdwnSection(originalHeading+"\n"+blockquote(v.RequestText)),
-		mrkdwnSection("*返信案*\n"+truncate(v.Draft, maxDisplayTextLen)),
+		mrkdwnSection("*返信案*\n"+slackfmt.ToMrkdwn(truncate(v.Draft, maxDisplayTextLen))),
 		slack.NewActionBlock(fmt.Sprintf("proxy_reply_%d", v.DraftID),
 			buttonElement(ActionApprove, v.DraftID, "Yes(この内容で送信)", slack.StylePrimary),
 			buttonElement(ActionReject, v.DraftID, "No(送信しない)", slack.StyleDanger),
@@ -323,7 +324,7 @@ func (s *Service) approvalBlocks(v approvalView) []slack.Block {
 // resultBlocks は決着後(送信済み/取りやめ)のボタンなし表示を組み立てます。
 func resultBlocks(draft, status string) []slack.Block {
 	return []slack.Block{
-		mrkdwnSection("*返信案*\n" + truncate(draft, maxDisplayTextLen)),
+		mrkdwnSection("*返信案*\n" + slackfmt.ToMrkdwn(truncate(draft, maxDisplayTextLen))),
 		mrkdwnSection(status),
 	}
 }

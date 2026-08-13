@@ -9,6 +9,7 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/slack-go/slack"
 
+	"github.com/yoshida-rio/marina/internal/slackfmt"
 	"github.com/yoshida-rio/marina/internal/tools"
 )
 
@@ -115,7 +116,9 @@ func buildDigestMessage(emails []tools.EmailSummary, j *judgement) string {
 
 	if summary := strings.TrimSpace(j.Summary); summary != "" {
 		b.WriteString("\n*サマリー*\n")
-		b.WriteString(escapeMrkdwn(summary))
+		// 先にエスケープしてからmrkdwnへ変換する。順序が逆だと、変換で作った
+		// リンク(<url|text>)の山括弧までエスケープされて表示が壊れる。
+		b.WriteString(slackfmt.ToMrkdwn(escapeMrkdwn(summary)))
 		b.WriteString("\n")
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/yoshida-rio/marina/internal/proxyreply"
+	"github.com/yoshida-rio/marina/internal/slackfmt"
 )
 
 // Responder はユーザー発話に対する応答を生成するインターフェースです。internal/agent.Agentが実装します。
@@ -200,7 +201,7 @@ func (h *Handler) HandleEvent(event slackevents.EventsAPIEvent, auths []EventAut
 	}
 
 	if _, _, err := h.slackClient.PostMessage(channel,
-		slack.MsgOptionText(reply, false),
+		slack.MsgOptionText(slackfmt.ToMrkdwn(reply), false),
 		slack.MsgOptionTS(replyThreadTS),
 	); err != nil {
 		log.Printf("slack post message error: %v", err)

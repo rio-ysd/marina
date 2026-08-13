@@ -100,3 +100,21 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("truncate() = %q, want %q", got, "あいう…")
 	}
 }
+
+// Claudeが一般的なMarkdownで書いてもSlackで太字になること、
+// かつ変換で生成したリンクがエスケープで壊れないこと。
+func TestBuildDigestMessageConvertsMarkdown(t *testing.T) {
+	j := &judgement{Summary: "・**重要**: 請求書の確認依頼\n・[詳細](https://example.com/x)を参照"}
+
+	got := buildDigestMessage([]tools.EmailSummary{{ID: "m1"}}, j)
+
+	if strings.Contains(got, "**重要**") {
+		t.Errorf("Markdownの太字が変換されていない:\n%s", got)
+	}
+	if !strings.Contains(got, "*重要*") {
+		t.Errorf("mrkdwnの太字になっていない:\n%s", got)
+	}
+	if !strings.Contains(got, "<https://example.com/x|詳細>") {
+		t.Errorf("リンクが壊れている:\n%s", got)
+	}
+}
