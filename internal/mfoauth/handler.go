@@ -32,6 +32,10 @@ func NewOAuthConfig(clientID, clientSecret, redirectURI string) *oauth2.Config {
 		Endpoint: oauth2.Endpoint{
 			AuthURL:  "https://api.biz.moneyforward.com/authorize",
 			TokenURL: "https://api.biz.moneyforward.com/token",
+			// アプリポータルの登録をCLIENT_SECRET_POSTにしているため、client_id/client_secretを
+			// リクエストボディで送る。既定のAutoDetectでもBasic認証で1回失敗してから
+			// POSTへフォールバックして動くが、無駄な往復を避けるため明示する。
+			AuthStyle: oauth2.AuthStyleInParams,
 		},
 	}
 }
