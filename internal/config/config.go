@@ -25,7 +25,7 @@ type Config struct {
 	// GoogleImpersonatedUser はドメイン委任で代理するユーザーのメールアドレス。
 	GoogleImpersonatedUser string
 
-	// MFClientID/MFClientSecret はMoneyForwardクラウド会計APIのOAuthクレデンシャル。
+	// MFClientID/MFClientSecret はMoneyForwardクラウド請求書APIのOAuthクレデンシャル。
 	// MFOAuthRedirectURIは認可コールバックのリダイレクトURI。
 	// いずれかが未設定の場合はMF請求書ツールはモッククライアントで動作する。
 	MFClientID         string

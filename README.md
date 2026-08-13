@@ -47,6 +47,9 @@ MoneyForward請求書APIはOAuth2のみをサポートしており、APIキー�
 
 詳細は [docs/proxy-reply.md](docs/proxy-reply.md) を参照してください。
 
+MoneyForwardクラウド会計API連携は未実装です。調査結果と実装に必要な情報は
+[docs/mf-accounting-api.md](docs/mf-accounting-api.md) にまとめてあります。
+
 ## Claude / Amazon Bedrockの設定
 
 marinaはClaudeをAnthropic APIに直接接続せず、Amazon Bedrock経由で呼び出します。
