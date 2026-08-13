@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 
@@ -19,6 +21,34 @@ Slack上でユーザーの秘書として、スケジュール/リマインダ�
 請求書・見積書の件数や一覧を聞かれたらmf_list_invoices/mf_list_estimatesを使います。
 期間を省略すると今月(JST)が対象になるので、「今月」ならfrom/toを指定せずに呼んでください。
 件数を答えるときは一覧の行数ではなく、ツールが返す総件数を使ってください。`
+
+// jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
+var jst = time.FixedZone("JST", 9*60*60)
+
+// systemPromptWithDate は現在日付を添えたシステムプロンプトを返します。
+// 日付が無いとClaudeは「今月」「来月」を解決できず、ツールを無駄に呼び続けてしまいます。
+func systemPromptWithDate(now time.Time) string {
+	return fmt.Sprintf("%s\n\n本日は %s です(JST)。「今月」「来月」「先週」などの相対的な期間はこの日付を基準に解釈してください。",
+		systemPrompt, now.In(jst).Format("2006年1月2日(Mon)"))
+}
+
+// replyOrFallback は空の応答をそのまま返さないようにします。
+// ツール実行の反復上限に達すると最終メッセージがtool_useブロックだけになり本文が空になります。
+// これをそのままSlackへ投稿するとno_textエラーで送信自体が失敗し、ユーザーには何も届きません。
+func replyOrFallback(msg *anthropic.BetaMessage) string {
+	if text := strings.TrimSpace(extractText(msg)); text != "" {
+		return text
+	}
+	var stop anthropic.BetaStopReason
+	if msg != nil {
+		stop = msg.StopReason
+	}
+	log.Printf("agent: empty reply text (stop_reason=%q)", stop)
+	if stop == anthropic.BetaStopReasonToolUse {
+		return "処理の途中で内部処理の上限に達しました。対象を絞る(期間や件数を指定する)ともう一度試せます。"
+	}
+	return "うまく回答を作れませんでした。表現を変えてもう一度お願いします。"
+}
 
 const maxHistoryMessages = 20
 const maxToolIterations = 8
@@ -70,7 +100,7 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 		BetaMessageNewParams: anthropic.BetaMessageNewParams{
 			Model:     a.model,
 			MaxTokens: 2048,
-			System:    []anthropic.BetaTextBlockParam{{Text: systemPrompt}},
+			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now())}},
 			Messages:  messages,
 		},
 		MaxIterations: maxToolIterations,
@@ -81,7 +111,7 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 		return "", fmt.Errorf("run to completion: %w", err)
 	}
 
-	replyText := extractText(final)
+	replyText := replyOrFallback(final)
 
 	if err := a.conversation.Append(ctx, threadKey, "user", userText); err != nil {
 		return "", fmt.Errorf("save user message: %w", err)

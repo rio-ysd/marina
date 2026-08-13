@@ -193,6 +193,11 @@ func (h *Handler) HandleEvent(event slackevents.EventsAPIEvent, auths []EventAut
 		log.Printf("agent respond error: %v", err)
 		reply = "すみません、応答の生成中にエラーが発生しました。"
 	}
+	// 空文字を投稿するとSlackがno_textで拒否し、ユーザーには何も届かないまま終わる。
+	if strings.TrimSpace(reply) == "" {
+		log.Print("agent returned empty reply; posting a fallback message")
+		reply = "すみません、うまく回答を作れませんでした。もう一度お試しください。"
+	}
 
 	if _, _, err := h.slackClient.PostMessage(channel,
 		slack.MsgOptionText(reply, false),
