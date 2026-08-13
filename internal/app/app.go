@@ -111,7 +111,7 @@ func New(cfg *config.Config) (*App, error) {
 		proxyReplier = proxyService
 	}
 
-	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, ag, proxyReplier)
+	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, cfg.SlackTypingEmoji, ag, proxyReplier)
 	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier)
 	digestRunner := morningdigest.NewRunner(anthropicClient, cfg.AnthropicModel, gmailClient, slackClient, cfg.MorningDigestSlackChannel)
 

@@ -92,7 +92,8 @@ Socket ModeはWebSocketを張り続ける常駐プロセスのため、Lambdaで
 ## Slack App側の設定
 
 - Bot Token Scopes: `chat:write`, `app_mentions:read`, `channels:history`, `im:history` など、対話に必要なスコープ
-  (代理返信フローを使う場合はさらに `im:write`, `users:read`, `groups:history`)
+  (代理返信フローを使う場合はさらに `im:write`, `users:read`, `groups:history`。
+  応答中のリアクション表示を使う場合は `reactions:write`)
 - User Token Scopes: 代理返信フローを使う場合は `chat:write` (本人として投稿するため)、
   DMも対象にする場合は `im:history` も追加
 - Event Subscriptions: `message.channels`, `message.im`, `app_mention` を有効化

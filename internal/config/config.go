@@ -43,6 +43,11 @@ type Config struct {
 	SlackUserOAuthToken    string
 	ProxyReplyTargetUserID string
 
+	// SlackTypingEmoji は処理中であることを示すためにユーザーの発言へ付けるリアクション名。
+	// 既定は typing-indicator。"off" または "none" を指定すると付けない。
+	// Botトークンに reactions:write スコープが必要。
+	SlackTypingEmoji string
+
 	// SlackAppToken はSocket Mode用のApp-Level Token(xapp-、スコープconnections:write)。
 	// cmd/socketmodeでのみ使用し、HTTP受信(cmd/server, cmd/lambda)では不要。
 	SlackAppToken string
@@ -76,6 +81,7 @@ func Load() (*Config, error) {
 		MorningDigestSlackChannel: os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
 		SlackUserOAuthToken:       os.Getenv("SLACK_USER_OAUTH_TOKEN"),
 		SlackAppToken:             os.Getenv("SLACK_APP_TOKEN"),
+		SlackTypingEmoji:          normalizeEmojiName(getEnvDefault("SLACK_TYPING_EMOJI", "typing-indicator")),
 		ProxyReplyTargetUserID:    os.Getenv("PROXY_REPLY_TARGET_USER_ID"),
 		ProxyReplyChannelIDs:      splitAndTrim(os.Getenv("PROXY_REPLY_CHANNEL_IDS")),
 		ProxyReplyIncludeDM:       getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
@@ -110,6 +116,17 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// normalizeEmojiName はリアクション名を正規化します。
+// APIはコロンなしの名前を要求するため前後のコロンを外し、off/noneは無効化(空文字)として扱います。
+func normalizeEmojiName(v string) string {
+	v = strings.Trim(strings.TrimSpace(v), ":")
+	switch strings.ToLower(v) {
+	case "", "off", "none", "false":
+		return ""
+	}
+	return v
 }
 
 // splitAndTrim はカンマ区切りの環境変数値を空要素を除いたスライスにします。

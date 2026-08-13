@@ -70,6 +70,8 @@ type Handler struct {
 	agent         Responder
 	proxy         ProxyReplier
 	botUserID     string
+	// typingEmoji は処理中を示すリアクション名(空なら付けない)。
+	typingEmoji string
 
 	// targetDMChannelID はmarinaと代理返信対象ユーザーのDMチャンネルID(遅延解決してキャッシュ)。
 	dmMu              sync.Mutex
@@ -78,13 +80,14 @@ type Handler struct {
 
 // NewHandler はHandlerを構築します。botTokenはSlack Web API呼び出し(chat.postMessage等)に使われます。
 // proxyがnilでない場合、対象ユーザー宛のメンションは代理返信フロー(確認DM)に回されます。
-func NewHandler(botToken, signingSecret string, agent Responder, proxy ProxyReplier) *Handler {
+func NewHandler(botToken, signingSecret, typingEmoji string, agent Responder, proxy ProxyReplier) *Handler {
 	client := slack.New(botToken)
 	h := &Handler{
 		signingSecret: signingSecret,
 		slackClient:   client,
 		agent:         agent,
 		proxy:         proxy,
+		typingEmoji:   typingEmoji,
 	}
 	if auth, err := client.AuthTest(); err == nil {
 		h.botUserID = auth.UserID
@@ -189,6 +192,10 @@ func (h *Handler) HandleEvent(event slackevents.EventsAPIEvent, auths []EventAut
 	}
 	threadKey := fmt.Sprintf("%s:%s", channel, replyThreadTS)
 
+	// 応答生成には十数秒かかることがあるため、受け付けたことがすぐ分かるように
+	// ユーザーの発言へリアクションを付け、投稿後に外す。
+	typing := h.addTypingReaction(ctx, channel, eventTS)
+
 	reply, err := h.agent.Respond(ctx, threadKey, channel, user, text)
 	if err != nil {
 		log.Printf("agent respond error: %v", err)
@@ -205,6 +212,32 @@ func (h *Handler) HandleEvent(event slackevents.EventsAPIEvent, auths []EventAut
 		slack.MsgOptionTS(replyThreadTS),
 	); err != nil {
 		log.Printf("slack post message error: %v", err)
+	}
+
+	if typing {
+		h.removeTypingReaction(ctx, channel, eventTS)
+	}
+}
+
+// addTypingReaction は処理中であることを示すリアクションを付け、付けられたかを返します。
+// リアクションは補助的な演出なので、スコープ不足や絵文字未登録で失敗しても応答は続行します。
+func (h *Handler) addTypingReaction(ctx context.Context, channel, timestamp string) bool {
+	if h.typingEmoji == "" || channel == "" || timestamp == "" {
+		return false
+	}
+	if err := h.slackClient.AddReactionContext(ctx, h.typingEmoji,
+		slack.ItemRef{Channel: channel, Timestamp: timestamp}); err != nil {
+		log.Printf("slack add reaction %q error: %v", h.typingEmoji, err)
+		return false
+	}
+	return true
+}
+
+// removeTypingReaction は処理中のリアクションを外します。
+func (h *Handler) removeTypingReaction(ctx context.Context, channel, timestamp string) {
+	if err := h.slackClient.RemoveReactionContext(ctx, h.typingEmoji,
+		slack.ItemRef{Channel: channel, Timestamp: timestamp}); err != nil {
+		log.Printf("slack remove reaction %q error: %v", h.typingEmoji, err)
 	}
 }
 
