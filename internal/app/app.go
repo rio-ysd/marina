@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	anthropic "github.com/anthropics/anthropic-sdk-go"
 	slackapi "github.com/slack-go/slack"
 
 	"github.com/yoshida-rio/marina/internal/agent"
@@ -18,6 +19,7 @@ import (
 	"github.com/yoshida-rio/marina/internal/slack"
 	"github.com/yoshida-rio/marina/internal/storage"
 	"github.com/yoshida-rio/marina/internal/tools"
+	"github.com/yoshida-rio/marina/internal/userprovision"
 )
 
 // App はSlackハンドラ・Agent・DBなど、marinaの主要コンポーネントを保持します。
@@ -56,8 +58,16 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build reminder tools: %w", err)
 	}
 
+	// アカウント作成の承認DMを送るためにツール構築より先にSlackクライアントを用意する。
+	slackClient := slackapi.New(cfg.SlackBotToken)
+
+	// Google連携(Gmail / Drive / カレンダー / スプレッドシート / People / Admin SDK)は
+	// 同じサービスアカウントを使うため、認証情報の有無をまとめて判定する。
+	// 未設定ならいずれもモッククライアントで動作する。
+	hasGoogle := cfg.HasGoogleCredentials()
+
 	var gmailClient tools.GmailClient = tools.NewMockGmailClient()
-	if cfg.HasGmailCredentials() {
+	if hasGoogle {
 		realGmailClient, err := tools.NewRealGmailClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
 		if err != nil {
 			return nil, fmt.Errorf("build gmail client: %w", err)
@@ -70,7 +80,7 @@ func New(cfg *config.Config) (*App, error) {
 	}
 
 	var driveClient tools.DriveClient = tools.NewMockDriveClient()
-	if cfg.HasDriveCredentials() {
+	if hasGoogle {
 		realDriveClient, err := tools.NewRealDriveClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
 		if err != nil {
 			return nil, fmt.Errorf("build drive client: %w", err)
@@ -80,6 +90,74 @@ func New(cfg *config.Config) (*App, error) {
 	driveTools, err := tools.NewDriveTools(driveClient)
 	if err != nil {
 		return nil, fmt.Errorf("build drive tools: %w", err)
+	}
+
+	var calendarClient tools.CalendarClient = tools.NewMockCalendarClient()
+	if hasGoogle {
+		realCalendarClient, err := tools.NewRealCalendarClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
+		if err != nil {
+			return nil, fmt.Errorf("build calendar client: %w", err)
+		}
+		calendarClient = realCalendarClient
+	}
+	calendarTools, err := tools.NewCalendarTools(calendarClient)
+	if err != nil {
+		return nil, fmt.Errorf("build calendar tools: %w", err)
+	}
+
+	var sheetsClient tools.SheetsClient = tools.NewMockSheetsClient()
+	if hasGoogle {
+		realSheetsClient, err := tools.NewRealSheetsClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
+		if err != nil {
+			return nil, fmt.Errorf("build sheets client: %w", err)
+		}
+		sheetsClient = realSheetsClient
+	}
+	sheetsTools, err := tools.NewSheetsTools(sheetsClient)
+	if err != nil {
+		return nil, fmt.Errorf("build sheets tools: %w", err)
+	}
+
+	var peopleClient tools.PeopleClient = tools.NewMockPeopleClient()
+	if hasGoogle {
+		realPeopleClient, err := tools.NewRealPeopleClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
+		if err != nil {
+			return nil, fmt.Errorf("build people client: %w", err)
+		}
+		peopleClient = realPeopleClient
+	}
+	peopleTools, err := tools.NewPeopleTools(peopleClient)
+	if err != nil {
+		return nil, fmt.Errorf("build people tools: %w", err)
+	}
+
+	// アカウント作成フロー: 承認者(USER_PROVISION_APPROVER_SLACK_USER_ID)が設定されている場合のみ
+	// ツールを登録する。未設定ならツール自体を渡さないので、Claudeは作成を試みることすらできない。
+	var directoryClient tools.DirectoryClient = tools.NewMockDirectoryClient()
+	if hasGoogle {
+		realDirectoryClient, err := tools.NewRealDirectoryClient(ctx, cfg.GoogleServiceAccountJSON, cfg.GoogleImpersonatedUser)
+		if err != nil {
+			return nil, fmt.Errorf("build directory client: %w", err)
+		}
+		directoryClient = realDirectoryClient
+	}
+	userProvision := userprovision.NewService(
+		cfg.UserProvisionApproverUserID,
+		storage.NewUserCreationRequestRepo(db),
+		directoryClient,
+		slackClient,
+	)
+	var directoryTools []anthropic.BetaTool
+	var userCreationApprover slack.UserCreationApprover
+	if userProvision != nil {
+		directoryTools, err = tools.NewDirectoryTools(directoryClient, userProvision)
+		if err != nil {
+			return nil, fmt.Errorf("build directory tools: %w", err)
+		}
+		userCreationApprover = userProvision
+		log.Printf("user provisioning enabled: approver=%s", userProvision.ApproverUserID())
+	} else {
+		log.Println("user provisioning disabled: USER_PROVISION_APPROVER_SLACK_USER_ID is not set")
 	}
 
 	oauthTokenRepo := storage.NewOAuthTokenRepo(db)
@@ -95,15 +173,20 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build mf invoice tools: %w", err)
 	}
 
-	allTools := append(append(append(append(taskTools, reminderTools...), gmailTools...), driveTools...), mfTools...)
+	// ツールの並び順はClaudeへの提示順。連携が増えたら追加するだけで済むようにまとめて連結する。
+	var allTools []anthropic.BetaTool
+	for _, set := range [][]anthropic.BetaTool{
+		taskTools, reminderTools, gmailTools, driveTools, calendarTools, sheetsTools,
+		peopleTools, directoryTools, mfTools,
+	} {
+		allTools = append(allTools, set...)
+	}
 
 	anthropicClient, err := bedrockclient.New(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build bedrock client: %w", err)
 	}
 	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo)
-
-	slackClient := slackapi.New(cfg.SlackBotToken)
 
 	// 代理返信フロー: User OAuthトークンがあり、その持ち主が対象ユーザーと一致する場合のみ有効化する。
 	// 有効でない場合は slack.ProxyReplier をnilのまま渡し、従来どおりmarina自身が応答する。
@@ -125,7 +208,7 @@ func New(cfg *config.Config) (*App, error) {
 	}
 
 	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, cfg.SlackTypingEmoji, ag, proxyReplier)
-	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier)
+	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier, userCreationApprover)
 	digestRunner := morningdigest.NewRunner(anthropicClient, cfg.AnthropicModel, gmailClient, slackClient, cfg.MorningDigestSlackChannel)
 
 	return &App{

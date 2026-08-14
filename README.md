@@ -1,8 +1,9 @@
 # marina
 
 Slack上で動く秘書AIエージェント。Claude (Anthropicモデル) をAmazon Bedrock経由で呼び出し、
-タスク管理・リマインダー・雑務相談に応答し、Gmailの朝チェック、Google Driveの資料検索、
-MoneyForwardクラウド請求書の見積書/請求書作成をFunction Callingツールとして提供します。
+タスク管理・リマインダー・雑務相談に応答し、Gmailの朝チェック、Googleカレンダーの予定確認、
+Google Driveの資料検索、スプレッドシートの読み書き、MoneyForwardクラウド請求書の見積書/請求書作成を
+Function Callingツールとして提供します。
 
 外部サービス連携はすべてFunction Calling(Tool Use)で実装する方針です。実装の作法と新規連携の追加手順は
 [docs/integration-guidelines.md](docs/integration-guidelines.md) にまとめてあります。
@@ -18,7 +19,7 @@ MoneyForwardクラウド請求書の見積書/請求書作成をFunction Calling
 - `infra` — AWS CDK(TypeScript)によるインフラ定義
 - `internal/agent` — Claude(Tool Useループ)
 - `internal/bedrockclient` — Amazon Bedrock経由でAnthropicクライアントを構築
-- `internal/tools` — タスク/リマインダー/Gmail/Google Drive/MoneyForward請求書のFunction Calling定義
+- `internal/tools` — タスク/リマインダー/Gmail/Googleカレンダー/Google Drive/スプレッドシート/MoneyForward請求書のFunction Calling定義
 - `internal/slack` — Slack Events API受信・署名検証・応答送信、Interactivity(ボタン押下)受信
 - `internal/proxyreply` — 本人宛メンションへの返信案作成→DMでYes/No確認→本人として代理返信
 - `internal/mfoauth` — MoneyForwardクラウド請求書API用OAuth2認可コールバック(`/mf/oauth/start`, `/mf/oauth/callback`)
@@ -26,16 +27,39 @@ MoneyForwardクラウド請求書の見積書/請求書作成をFunction Calling
 - `internal/morningdigest` — 朝のGmailダイジェストのロジック
 - `migrations` — golang-migrate用SQLマイグレーション
 
-Gmail連携とGoogle Drive連携はGoogle Workspaceサービスアカウント + ドメイン委任(`GmailClient` / `DriveClient`)、
-MoneyForward請求書連携はOAuth2 authorizationCodeフロー(`MFInvoiceClient`)で実装しています。
-いずれも認証情報未設定時はモック実装で動作します。
+Google連携(Gmail / カレンダー / Drive / スプレッドシート)はGoogle Workspaceサービスアカウント +
+ドメイン委任で実装しており、4つとも同じ認証情報(`GOOGLE_SERVICE_ACCOUNT_JSON` /
+`GOOGLE_IMPERSONATED_USER`)を使います。MoneyForward請求書連携はOAuth2 authorizationCodeフロー
+(`MFInvoiceClient`)です。いずれも認証情報未設定時はモック実装で動作します。
 
-Google Drive連携はGmailと同じ認証情報(`GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_IMPERSONATED_USER`)を使い、
-資料の検索(`drive_search_files`)・フォルダ一覧(`drive_list_folder`)・本文の読み取り(`drive_read_file`)・
-Googleドキュメントの作成(`drive_create_document`)を提供します。**ドメイン委任の許可スコープに
-`https://www.googleapis.com/auth/drive` を追加する必要があります**。削除・共有権限の変更は
-誤爆時に戻せないため、意図的にツールとして公開していません。詳細は
-[docs/google-drive.md](docs/google-drive.md) を参照してください。
+| 連携 | ツール | ドメイン委任に必要なスコープ |
+|---|---|---|
+| Gmail | `gmail_list_unread` / `gmail_mark_as_read` / `gmail_create_draft` | `gmail.readonly`, `gmail.modify`, `gmail.compose` |
+| カレンダー | `calendar_list_events` / `calendar_create_event` | `calendar` |
+| Drive | `drive_search_files` / `drive_list_folder` / `drive_read_file` / `drive_create_document` | `drive` |
+| スプレッドシート | `sheets_get_info` / `sheets_read_range` / `sheets_append_rows` | `spreadsheets` |
+| 社内メンバー・連絡先の検索 | `people_search_directory` / `people_search_contacts` | `directory.readonly`, `contacts.readonly` |
+| アカウント作成(承認フロー付き) | `directory_request_user_creation` | `admin.directory.user` |
+
+**ドメイン委任の編集画面は入力した内容で許可スコープが置き換わります**。どれか1つを足すときも、
+上の表のスコープをすべて入力してください(`https://www.googleapis.com/auth/` を頭に付けたもの)。
+加えて、**Google Cloudコンソールで各APIの有効化が必要**です(Drive / Calendar / Sheets / People /
+Admin SDK)。有効化されていないAPIは、スコープを登録しても `403 SERVICE_DISABLED` で失敗します。
+
+削除・共有権限の変更・既存データの上書き・予定の変更・参加者の招待は、Slackの曖昧な指示で誤爆すると
+戻せないため意図的にツールとして公開していません。詳細は
+[docs/google-drive.md](docs/google-drive.md) / [docs/google-calendar.md](docs/google-calendar.md) /
+[docs/google-sheets.md](docs/google-sheets.md) / [docs/google-people.md](docs/google-people.md) を
+参照してください。
+
+アカウント作成だけは業務上必要なため、**承認者のYes/No確認を挟むフロー**として実装しています。
+Claudeが呼べるのは依頼ツールのみで、作成を直接実行するツールは存在しません。
+`USER_PROVISION_APPROVER_SLACK_USER_ID` が未設定の場合は依頼ツール自体を登録しません。
+詳細は [docs/google-user-provisioning.md](docs/google-user-provisioning.md) を参照してください。
+
+なお、Google+ API / Google+ Domains API はどちらも廃止済みで、そもそもアカウント発行の機能を
+持っていませんでした。社内メンバーの検索はPeople API、アカウント作成はAdmin SDK Directory APIが
+後継にあたります。
 
 MoneyForward請求書APIはOAuth2のみをサポートしており、APIキー方式は使えません。初回のみ人間がブラウザで
 `https://<公開ドメイン>/mf/oauth/start` にアクセスして認可する必要がありますが、以降はrefresh_tokenが

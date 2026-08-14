@@ -20,7 +20,7 @@ type Config struct {
 	BedrockRegion string
 
 	// GoogleServiceAccountJSON はサービスアカウントの秘密鍵JSON文字列。
-	// Gmail連携とGoogle Drive連携で共通に使う。
+	// Google連携(Gmail / Drive / カレンダー / スプレッドシート / People / Admin SDK)で共通に使う。
 	// 未設定の場合はいずれもモッククライアントで動作する。
 	GoogleServiceAccountJSON string
 	// GoogleImpersonatedUser はドメイン委任で代理するユーザーのメールアドレス。
@@ -35,6 +35,10 @@ type Config struct {
 
 	// MorningDigestSlackChannel は朝のダイジェストを送信するSlackチャンネル/DM先ID。
 	MorningDigestSlackChannel string
+
+	// UserProvisionApproverUserID はGoogle Workspaceアカウント作成を承認できるSlackユーザーID。
+	// 未設定の場合はアカウント作成ツール自体を登録しない(Claudeが作成を試みることすらできない)。
+	UserProvisionApproverUserID string
 
 	// SlackUserOAuthToken は代理返信で本人として投稿するためのUser OAuthトークン(xoxp-)。
 	// 設定されている場合のみ代理返信フローが有効になる。
@@ -69,23 +73,24 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AnthropicModel:            getEnvDefault("ANTHROPIC_MODEL", "anthropic.claude-sonnet-5"),
-		SlackBotToken:             os.Getenv("SLACK_BOT_TOKEN"),
-		SlackSigningSecret:        os.Getenv("SLACK_SIGNING_SECRET"),
-		DBDSN:                     os.Getenv("DB_DSN"),
-		BedrockRegion:             getEnvDefault("BEDROCK_REGION", "us-east-1"),
-		GoogleServiceAccountJSON:  os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
-		GoogleImpersonatedUser:    os.Getenv("GOOGLE_IMPERSONATED_USER"),
-		MFClientID:                os.Getenv("MF_CLIENT_ID"),
-		MFClientSecret:            os.Getenv("MF_CLIENT_SECRET"),
-		MFOAuthRedirectURI:        os.Getenv("MF_OAUTH_REDIRECT_URI"),
-		MorningDigestSlackChannel: os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
-		SlackUserOAuthToken:       os.Getenv("SLACK_USER_OAUTH_TOKEN"),
-		SlackAppToken:             os.Getenv("SLACK_APP_TOKEN"),
-		SlackTypingEmoji:          normalizeEmojiName(getEnvDefault("SLACK_TYPING_EMOJI", "typing-indicator")),
-		ProxyReplyTargetUserID:    os.Getenv("PROXY_REPLY_TARGET_USER_ID"),
-		ProxyReplyChannelIDs:      splitAndTrim(os.Getenv("PROXY_REPLY_CHANNEL_IDS")),
-		ProxyReplyIncludeDM:       getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
+		AnthropicModel:              getEnvDefault("ANTHROPIC_MODEL", "anthropic.claude-sonnet-5"),
+		SlackBotToken:               os.Getenv("SLACK_BOT_TOKEN"),
+		SlackSigningSecret:          os.Getenv("SLACK_SIGNING_SECRET"),
+		DBDSN:                       os.Getenv("DB_DSN"),
+		BedrockRegion:               getEnvDefault("BEDROCK_REGION", "us-east-1"),
+		GoogleServiceAccountJSON:    os.Getenv("GOOGLE_SERVICE_ACCOUNT_JSON"),
+		GoogleImpersonatedUser:      os.Getenv("GOOGLE_IMPERSONATED_USER"),
+		MFClientID:                  os.Getenv("MF_CLIENT_ID"),
+		MFClientSecret:              os.Getenv("MF_CLIENT_SECRET"),
+		MFOAuthRedirectURI:          os.Getenv("MF_OAUTH_REDIRECT_URI"),
+		MorningDigestSlackChannel:   os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
+		UserProvisionApproverUserID: strings.TrimSpace(os.Getenv("USER_PROVISION_APPROVER_SLACK_USER_ID")),
+		SlackUserOAuthToken:         os.Getenv("SLACK_USER_OAUTH_TOKEN"),
+		SlackAppToken:               os.Getenv("SLACK_APP_TOKEN"),
+		SlackTypingEmoji:            normalizeEmojiName(getEnvDefault("SLACK_TYPING_EMOJI", "typing-indicator")),
+		ProxyReplyTargetUserID:      os.Getenv("PROXY_REPLY_TARGET_USER_ID"),
+		ProxyReplyChannelIDs:        splitAndTrim(os.Getenv("PROXY_REPLY_CHANNEL_IDS")),
+		ProxyReplyIncludeDM:         getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
 	}
 
 	required := map[string]string{
@@ -102,15 +107,11 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// HasGmailCredentials はGmail連携の実クライアントが利用可能かを返します。
-func (c *Config) HasGmailCredentials() bool {
-	return c.GoogleServiceAccountJSON != "" && c.GoogleImpersonatedUser != ""
-}
-
-// HasDriveCredentials はGoogle Drive連携の実クライアントが利用可能かを返します。
-// 認証情報はGmailと共通ですが、ドメイン委任の許可スコープにDriveスコープを追加する必要があります
-// (未追加の場合は起動には成功し、ツール呼び出し時にunauthorized_clientで失敗します)。
-func (c *Config) HasDriveCredentials() bool {
+// HasGoogleCredentials はGoogle連携(Gmail / Drive / カレンダー / スプレッドシート)の
+// 実クライアントが利用可能かを返します。4つとも同じサービスアカウントを使うため判定は共通です。
+// 個々のAPIを使えるかは、ドメイン委任の許可スコープにそのAPIのスコープが登録されているかで決まります
+// (未登録の場合は起動には成功し、ツール呼び出し時にunauthorized_clientで失敗します)。
+func (c *Config) HasGoogleCredentials() bool {
 	return c.GoogleServiceAccountJSON != "" && c.GoogleImpersonatedUser != ""
 }
 

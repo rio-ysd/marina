@@ -40,6 +40,10 @@ Function Callingでの自前実装になる。この前提は
 参考実装:
 
 - Google Drive — [gdrive.go](../internal/tools/gdrive.go) / [gdrive_real.go](../internal/tools/gdrive_real.go)(サービスアカウント + ドメイン委任)
+- Googleカレンダー — [gcalendar.go](../internal/tools/gcalendar.go) / [gcalendar_real.go](../internal/tools/gcalendar_real.go)(日時の正規化あり)
+- Googleスプレッドシート — [gsheets.go](../internal/tools/gsheets.go) / [gsheets_real.go](../internal/tools/gsheets_real.go)(追記のみ公開)
+- People API — [gpeople.go](../internal/tools/gpeople.go) / [gpeople_real.go](../internal/tools/gpeople_real.go)(参照専用)
+- Admin SDK(アカウント作成) — [gdirectory.go](../internal/tools/gdirectory.go) / [userprovision](../internal/userprovision/)(承認フロー付き)
 - MoneyForward請求書 — [mfinvoice.go](../internal/tools/mfinvoice.go) / [mfinvoice_real.go](../internal/tools/mfinvoice_real.go)(OAuth2 authorization code + refresh)
 - Gmail — [gmail.go](../internal/tools/gmail.go) / [gmail_real.go](../internal/tools/gmail_real.go)
 
@@ -49,6 +53,7 @@ Function Callingでの自前実装になる。この前提は
 
 `config.Config`に`HasXxxCredentials()`を足し、[internal/app/app.go](../internal/app/app.go)で
 実クライアントとモックを切り替える。認証情報が無い環境で`app.New()`が失敗してはいけない。
+同じ認証情報を共有する連携は判定も共有する(Google 4連携はまとめて`HasGoogleCredentials()`)。
 
 ```go
 var driveClient tools.DriveClient = tools.NewMockDriveClient()
@@ -104,8 +109,24 @@ descriptionは日本語で書き、ツールの説明には**どんな依頼の�
 
 - Gmailは下書き作成(`gmail_create_draft`)まで。送信はしない
 - Google Driveは検索・読み取り・作成まで。削除と共有設定の変更は実装しない
+- スプレッドシートは末尾への追記まで。既存セルの上書き・クリアは実装しない
+- カレンダーは自分の予定の作成まで。削除・変更・参加者の招待は実装しない
 - 本人として発言する代理返信はツールではなく、DMでのYes/No確認を挟む専用フロー
   ([docs/proxy-reply.md](proxy-reply.md))
+
+### 5-1. どうしても必要な破壊的操作は、確認フローに載せる
+
+業務上どうしても必要な操作(アカウント作成など)は、素のツールにせず**実行の判断を人間に残す**。
+Claudeには「依頼するツール」だけを渡し、実行は承認者がSlackのYes/Noボタンを押した後に行う。
+
+- 依頼→pending保存→承認者へ確認DM→ボタン押下で実行、という形にする
+  ([internal/userprovision](../internal/userprovision/)、[docs/google-user-provisioning.md](google-user-provisioning.md))
+- **承認者以外のボタン押下は無視する**。`ActorUserID`と承認者IDの一致を必ず確認する
+- 連打やイベント再送で二重実行しないよう、`pending → 決着` の遷移を取れた場合のみ実行する
+- 実行に失敗したら`pending`へ戻し、承認者に理由を伝える
+- 承認者が未設定なら**ツール自体を登録しない**。渡さなければClaudeは試みることすらできない
+- Claudeが「やった」と誤って報告しないよう、ツールの説明と戻り値の両方に
+  「まだ実行されていない」ことを書く
 
 読めない・扱えない対象はエラーにして、Claudeが代替案を案内できるようにする。
 エラー文にはユーザーへそのまま伝えられる情報(ファイル名・URLなど)を入れる。

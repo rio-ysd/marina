@@ -22,7 +22,7 @@ func main() {
 	}
 	defer a.DB.Close()
 
-	if !cfg.HasGmailCredentials() {
+	if !cfg.HasGoogleCredentials() {
 		log.Println("警告: GOOGLE_SERVICE_ACCOUNT_JSON/GOOGLE_IMPERSONATED_USERが未設定のため、モックGmailクライアントで実行します。")
 	}
 

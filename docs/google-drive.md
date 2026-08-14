@@ -10,16 +10,38 @@ Google Driveの資料検索・読み取り・ドキュメント作成をFunction
 
 | 環境変数 | 内容 |
 |---|---|
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | サービスアカウントの秘密鍵JSON文字列(Gmailと共通) |
-| `GOOGLE_IMPERSONATED_USER` | ドメイン委任で代理するユーザーのメールアドレス(Gmailと共通) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | サービスアカウントの秘密鍵JSON文字列(Google連携で共通) |
+| `GOOGLE_IMPERSONATED_USER` | ドメイン委任で代理するユーザーのメールアドレス(Google連携で共通) |
 
 いずれかが未設定の場合は`MockDriveClient`で動作する(起動は成功し、モック応答が返る)。
+判定は`config.HasGoogleCredentials()`で、Gmail / Drive / カレンダー / スプレッドシートで共通。
 
 ### 必要なスコープ
+
+Drive連携に必要なのはこれ。
 
 ```
 https://www.googleapis.com/auth/drive
 ```
+
+ドメイン委任は1つのサービスアカウントに対する設定で、**編集画面で入力した内容がそのまま許可スコープに
+なる(追記ではなく置き換え)**。そのため、どれか1つを足すときも他の連携のスコープを含めて全部入力する。
+marinaが現在使うスコープの一覧:
+
+| 連携 | スコープ |
+|---|---|
+| Gmail | `.../auth/gmail.readonly`, `.../auth/gmail.modify`, `.../auth/gmail.compose` |
+| Drive | `.../auth/drive` |
+| カレンダー | `.../auth/calendar` |
+| スプレッドシート | `.../auth/spreadsheets` |
+| People(社内検索・連絡先) | `.../auth/directory.readonly`, `.../auth/contacts.readonly` |
+| Admin SDK(アカウント作成) | `.../auth/admin.directory.user` |
+
+(`.../` は `https://www.googleapis.com` の略)
+
+スコープの登録とは別に、**Google Cloudコンソールでの各APIの有効化も必要**。
+有効化されていないAPIは `403 SERVICE_DISABLED` で失敗し、スコープ未登録の
+`unauthorized_client` とは別のエラーになる。
 
 `drive.file`(アプリが作成したファイルのみ)では、**既存フォルダを保存先に指定した作成ができない**
 (親フォルダが404になる)ため、フルスコープを使っている。代わりに削除・共有権限変更のツールは

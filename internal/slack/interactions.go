@@ -11,17 +11,27 @@ import (
 	"github.com/slack-go/slack"
 
 	"github.com/yoshida-rio/marina/internal/proxyreply"
+	"github.com/yoshida-rio/marina/internal/userprovision"
 )
 
+// UserCreationApprover はアカウント作成の確認DMに付いたYes/Noボタンの押下を処理します。
+// internal/userprovision.Serviceが実装します。
+type UserCreationApprover interface {
+	HandleAction(ctx context.Context, a userprovision.Action) error
+}
+
 // InteractionHandler はSlackのInteractivity(Block Kitのボタン押下)のWebhookを処理します。
-// 代理返信の確認DMに付いたYes/Noボタンの押下がここに届きます。
+// 代理返信とアカウント作成の確認DMに付いたYes/Noボタンの押下がここに届きます。
 type InteractionHandler struct {
 	signingSecret string
 	proxy         ProxyReplier
+	userCreation  UserCreationApprover
 }
 
-func NewInteractionHandler(signingSecret string, proxy ProxyReplier) *InteractionHandler {
-	return &InteractionHandler{signingSecret: signingSecret, proxy: proxy}
+// NewInteractionHandler はInteractionHandlerを構築します。
+// proxy / userCreation はそれぞれの機能が無効な場合nilで渡され、その種類のボタンは無視されます。
+func NewInteractionHandler(signingSecret string, proxy ProxyReplier, userCreation UserCreationApprover) *InteractionHandler {
+	return &InteractionHandler{signingSecret: signingSecret, proxy: proxy, userCreation: userCreation}
 }
 
 // ServeHTTP はInteractivity Request URL(例: /slack/interactions)として機能します。
@@ -78,7 +88,7 @@ func (h *InteractionHandler) HandleInteractionPayload(body []byte) error {
 // HandleInteraction はパース済みのInteractivityペイロードを処理します。
 // HTTP(Interactivity Request URL)とSocket Modeの両方から呼ばれます。
 func (h *InteractionHandler) HandleInteraction(callback slack.InteractionCallback) {
-	if h.proxy == nil || callback.Type != slack.InteractionTypeBlockActions {
+	if callback.Type != slack.InteractionTypeBlockActions {
 		return
 	}
 
@@ -96,17 +106,33 @@ func (h *InteractionHandler) HandleInteraction(callback slack.InteractionCallbac
 		if action == nil {
 			continue
 		}
-		if action.ActionID != proxyreply.ActionApprove && action.ActionID != proxyreply.ActionReject {
-			continue
-		}
-		if err := h.proxy.HandleAction(ctx, proxyreply.Action{
-			ActionID:        action.ActionID,
-			Value:           action.Value,
-			ActorUserID:     callback.User.ID,
-			ApprovalChannel: channel,
-			ApprovalTS:      ts,
-		}); err != nil {
-			log.Printf("proxy reply action error: %v", err)
+		switch action.ActionID {
+		case proxyreply.ActionApprove, proxyreply.ActionReject:
+			if h.proxy == nil {
+				continue
+			}
+			if err := h.proxy.HandleAction(ctx, proxyreply.Action{
+				ActionID:        action.ActionID,
+				Value:           action.Value,
+				ActorUserID:     callback.User.ID,
+				ApprovalChannel: channel,
+				ApprovalTS:      ts,
+			}); err != nil {
+				log.Printf("proxy reply action error: %v", err)
+			}
+		case userprovision.ActionApprove, userprovision.ActionReject:
+			if h.userCreation == nil {
+				continue
+			}
+			if err := h.userCreation.HandleAction(ctx, userprovision.Action{
+				ActionID:        action.ActionID,
+				Value:           action.Value,
+				ActorUserID:     callback.User.ID,
+				ApprovalChannel: channel,
+				ApprovalTS:      ts,
+			}); err != nil {
+				log.Printf("user creation action error: %v", err)
+			}
 		}
 	}
 }
