@@ -9,9 +9,16 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 
+	"github.com/yoshida-rio/marina/internal/instructions"
 	"github.com/yoshida-rio/marina/internal/storage"
 	"github.com/yoshida-rio/marina/internal/tools"
 )
+
+// InstructionProvider はApp Homeで設定された追加指示の本文を返します。
+// internal/instructions.Storeが実装します。取得できない場合は空文字を返します。
+type InstructionProvider interface {
+	Text(ctx context.Context) string
+}
 
 const systemPrompt = `あなたは日本語で対応する優秀な秘書AIエージェント「marina」です。
 Slack上でユーザーの秘書として、スケジュール/リマインダー管理、タスク管理、雑務の相談、
@@ -41,11 +48,12 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
 var jst = time.FixedZone("JST", 9*60*60)
 
-// systemPromptWithDate は現在日付を添えたシステムプロンプトを返します。
+// systemPromptWithDate は現在日付とApp Homeで設定された追加指示を添えたシステムプロンプトを返します。
 // 日付が無いとClaudeは「今月」「来月」を解決できず、ツールを無駄に呼び続けてしまいます。
-func systemPromptWithDate(now time.Time) string {
-	return fmt.Sprintf("%s\n\n本日は %s です(JST)。「今月」「来月」「先週」などの相対的な期間はこの日付を基準に解釈してください。",
-		systemPrompt, now.In(jst).Format("2006年1月2日(Mon)"))
+// customが空の場合は何も足しません。
+func systemPromptWithDate(now time.Time, custom string) string {
+	return fmt.Sprintf("%s\n\n本日は %s です(JST)。「今月」「来月」「先週」などの相対的な期間はこの日付を基準に解釈してください。%s",
+		systemPrompt, now.In(jst).Format("2006年1月2日(Mon)"), instructions.PromptSection(custom))
 }
 
 // replyOrFallback は空の応答をそのまま返さないようにします。
@@ -75,16 +83,27 @@ type Agent struct {
 	model        anthropic.Model
 	tools        []anthropic.BetaTool
 	conversation *storage.ConversationRepo
+	instructions InstructionProvider
 }
 
 // New はAgentを構築します。toolsにはtask/reminder/gmail/mfinvoice等の全ツールを渡します。
-func New(client anthropic.Client, model string, allTools []anthropic.BetaTool, conversation *storage.ConversationRepo) *Agent {
+// instructionsはApp Homeで設定された追加指示の供給元です(nil可)。
+func New(client anthropic.Client, model string, allTools []anthropic.BetaTool, conversation *storage.ConversationRepo, customInstructions InstructionProvider) *Agent {
 	return &Agent{
 		client:       client,
 		model:        anthropic.Model(model),
 		tools:        allTools,
 		conversation: conversation,
+		instructions: customInstructions,
 	}
+}
+
+// customInstructions はApp Homeで設定された追加指示を返します。未設定なら空文字です。
+func (a *Agent) customInstructions(ctx context.Context) string {
+	if a.instructions == nil {
+		return ""
+	}
+	return a.instructions.Text(ctx)
 }
 
 // Respond はSlackから受け取ったユーザー発話に対する応答テキストを生成します。
@@ -116,7 +135,7 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 		BetaMessageNewParams: anthropic.BetaMessageNewParams{
 			Model:     a.model,
 			MaxTokens: 2048,
-			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now())}},
+			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now(), a.customInstructions(ctx))}},
 			Messages:  messages,
 		},
 		MaxIterations: maxToolIterations,

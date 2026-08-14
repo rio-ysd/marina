@@ -40,6 +40,10 @@ type Config struct {
 	// 未設定の場合はアカウント作成ツール自体を登録しない(Claudeが作成を試みることすらできない)。
 	UserProvisionApproverUserID string
 
+	// HomeAdminUserID はSlack App Homeから追加指示を編集できるSlackユーザーID。
+	// 未設定の場合、Homeタブは誰でも閲覧できるが編集ボタンは出ない。
+	HomeAdminUserID string
+
 	// SlackUserOAuthToken は代理返信で本人として投稿するためのUser OAuthトークン(xoxp-)。
 	// 設定されている場合のみ代理返信フローが有効になる。
 	// ProxyReplyTargetUserID は代理返信の対象者のSlackユーザーID。
@@ -85,6 +89,7 @@ func Load() (*Config, error) {
 		MFOAuthRedirectURI:          os.Getenv("MF_OAUTH_REDIRECT_URI"),
 		MorningDigestSlackChannel:   os.Getenv("MORNING_DIGEST_SLACK_CHANNEL"),
 		UserProvisionApproverUserID: strings.TrimSpace(os.Getenv("USER_PROVISION_APPROVER_SLACK_USER_ID")),
+		HomeAdminUserID:             strings.TrimSpace(os.Getenv("HOME_ADMIN_SLACK_USER_ID")),
 		SlackUserOAuthToken:         os.Getenv("SLACK_USER_OAUTH_TOKEN"),
 		SlackAppToken:               os.Getenv("SLACK_APP_TOKEN"),
 		SlackTypingEmoji:            normalizeEmojiName(getEnvDefault("SLACK_TYPING_EMOJI", "typing-indicator")),

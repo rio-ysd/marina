@@ -68,12 +68,27 @@ func TestSystemPromptIncludesJSTDate(t *testing.T) {
 	// UTCでは前日になる時刻。JSTで解釈されていれば8月14日になる。
 	utcNight := time.Date(2026, 8, 13, 20, 30, 0, 0, time.UTC)
 
-	got := systemPromptWithDate(utcNight)
+	got := systemPromptWithDate(utcNight, "")
 
 	if !strings.Contains(got, "2026年8月14日") {
 		t.Errorf("prompt should carry the JST date, got:\n%s", got)
 	}
 	if !strings.Contains(got, "marina") {
 		t.Error("prompt should still contain the base system prompt")
+	}
+}
+
+// App Homeで設定した追加指示がシステムプロンプトに載ること。未設定なら何も足さないこと。
+func TestSystemPromptIncludesCustomInstructions(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+
+	got := systemPromptWithDate(now, "SALON BOARD関連のメールは既読にするだけでよい")
+	if !strings.Contains(got, "SALON BOARD関連のメールは既読にするだけでよい") {
+		t.Errorf("prompt should carry the custom instructions, got:\n%s", got)
+	}
+
+	withoutCustom := systemPromptWithDate(now, "   ")
+	if strings.Contains(withoutCustom, "追加の運用ルール") {
+		t.Errorf("blank instructions should add nothing, got:\n%s", withoutCustom)
 	}
 }

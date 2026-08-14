@@ -75,7 +75,7 @@ func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.API
 	case slackEventsPath:
 		return handleSlackEvents(ctx, req, body)
 	case slackInteractionsPath:
-		return handleSlackRequest(ctx, req, body, marinaslack.AsyncKindInteractions)
+		return handleSlackInteractions(ctx, req, body)
 	default:
 		// /healthz や /mf/oauth/... は短時間で終わるためMuxで同期処理する。
 		return serveMux(ctx, req, body)
@@ -104,13 +104,27 @@ func handleSlackEvents(ctx context.Context, req events.APIGatewayProxyRequest, b
 	return dispatch(ctx, marinaslack.AsyncKindEvents, body)
 }
 
-// handleSlackRequest は署名検証してワーカーへ回すだけのリクエスト(Interactivity)を処理します。
-func handleSlackRequest(ctx context.Context, req events.APIGatewayProxyRequest, body []byte, kind string) (events.APIGatewayProxyResponse, error) {
+// handleSlackInteractions はInteractivity(ボタン押下・モーダルの送信)を処理します。
+// App Homeのモーダルはtrigger_idの有効期限が3秒しかなく、ワーカーLambdaの起動を待つと開けないため、
+// その種類だけはワーカーへ回さずここで処理します(Slack APIを1〜2回叩くだけで済む処理に限ります)。
+func handleSlackInteractions(ctx context.Context, req events.APIGatewayProxyRequest, body []byte) (events.APIGatewayProxyResponse, error) {
 	if err := marinaslack.VerifySignature(httpHeader(req), body, marinaApp.Config.SlackSigningSecret); err != nil {
 		log.Printf("slack signature verification failed: %v", err)
 		return textResponse(http.StatusUnauthorized, "invalid signature"), nil
 	}
-	return dispatch(ctx, kind, body)
+
+	handled, err := marinaApp.InteractionHandler.TryHandleSync(body)
+	if err != nil {
+		log.Printf("handle interaction synchronously: %v", err)
+		return textResponse(http.StatusBadRequest, "failed to parse payload"), nil
+	}
+	if handled {
+		// モーダルの送信(view_submission)はボディが空のときだけ閉じる。
+		// テキストを返すとSlack側でパースに失敗し「接続に問題が発生しました」と表示される。
+		return events.APIGatewayProxyResponse{StatusCode: http.StatusOK}, nil
+	}
+
+	return dispatch(ctx, marinaslack.AsyncKindInteractions, body)
 }
 
 // dispatch はワーカーLambdaを非同期invokeします。ワーカー未設定の場合はその場で同期処理します。

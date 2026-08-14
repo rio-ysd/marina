@@ -23,6 +23,7 @@ Function Callingツールとして提供します。
 - `internal/slack` — Slack Events API受信・署名検証・応答送信、Interactivity(ボタン押下)受信
 - `internal/proxyreply` — 本人宛メンションへの返信案作成→DMでYes/No確認→本人として代理返信
 - `internal/mfoauth` — MoneyForwardクラウド請求書API用OAuth2認可コールバック(`/mf/oauth/start`, `/mf/oauth/callback`)
+- `internal/instructions` — App Homeで編集する「追加の運用ルール」の読み書き
 - `internal/storage` — MySQL(RDS)への永続化
 - `internal/morningdigest` — 朝のGmailダイジェストのロジック
 - `migrations` — golang-migrate用SQLマイグレーション
@@ -82,6 +83,19 @@ MoneyForward請求書APIはOAuth2のみをサポートしており、APIキー�
 
 詳細は [docs/proxy-reply.md](docs/proxy-reply.md) を参照してください。
 
+## 追加の運用ルール(App Homeから編集)
+
+Slack App Homeのホームタブに「追加の運用ルール」を書いておくと、その内容が**Slackでの応答**と
+**朝のメールダイジェスト**の両方のシステムプロンプトに差し込まれます。コード変更・再デプロイなしで
+判断のルールを足せます(例: `SALON BOARD関連のメールは重要ではないので、既読にするだけでよい`)。
+
+- 編集できるのは `HOME_ADMIN_SLACK_USER_ID` に指定したユーザーのみ。未設定なら閲覧のみになります
+- Slack Appで **App Home の Home Tab を有効化**し、**`app_home_opened` イベントを購読**してください
+- 保存先は `app_settings` テーブル(キー `custom_instructions`)。更新者と更新日時もホームタブに表示します
+- 上限は3000文字。システムプロンプトは全リクエストに乗るため、長いほど毎回のトークン消費が増えます
+
+詳細は [docs/app-home.md](docs/app-home.md) を参照してください。
+
 MoneyForwardクラウド会計API連携は未実装です。調査結果と実装に必要な情報は
 [docs/mf-accounting-api.md](docs/mf-accounting-api.md) にまとめてあります。
 
@@ -132,7 +146,9 @@ Socket ModeはWebSocketを張り続ける常駐プロセスのため、Lambdaで
 - User Token Scopes: 代理返信フローを使う場合は `chat:write` (本人として投稿するため)、
   DMも対象にする場合は `im:history` も追加
 - Event Subscriptions: `message.channels`, `message.im`, `app_mention` を有効化
-- Interactivity & Shortcuts: 代理返信のYes/Noボタンを使う場合は有効化し、Request URLに
+  (App Homeの追加ルールを使う場合はさらに `app_home_opened`)
+- App Home: 追加の運用ルールをホームタブから編集する場合は「Home Tab」を有効化
+- Interactivity & Shortcuts: 代理返信のYes/Noボタン、またはApp Homeの編集を使う場合は有効化し、Request URLに
   `https://<公開ドメイン>/slack/interactions` を設定
 - Signing Secret / Bot User OAuth Token を `.env` の `SLACK_SIGNING_SECRET` / `SLACK_BOT_TOKEN` に設定
 - User OAuth Token (`xoxp-`) を `.env` の `SLACK_USER_OAUTH_TOKEN` に設定
@@ -143,7 +159,7 @@ Socket ModeはWebSocketを張り続ける常駐プロセスのため、Lambdaで
 - `cmd/lambda` → `cmd/eventworker` を非同期invoke : Claude呼び出しとSlackへの投稿
 - EventBridge (平日9:00 JST) → `cmd/morningdigest` : Gmail朝チェック
 - EventBridge (5分おき) → `cmd/reminderworker` : リマインダー送信
-- RDS (MySQL) : タスク/リマインダー/会話履歴/OAuthトークン/返信下書きの永続化
+- RDS (MySQL) : タスク/リマインダー/会話履歴/OAuthトークン/返信下書き/App Homeの設定値の永続化
 - Secrets Manager : Slackトークン等の設定値とDB認証情報
 
 インフラは [infra/](infra/) の AWS CDK で定義し、`main`へのpushで GitHub Actions がデプロイします。

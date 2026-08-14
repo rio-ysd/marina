@@ -69,6 +69,7 @@ type Handler struct {
 	slackClient   *slack.Client
 	agent         Responder
 	proxy         ProxyReplier
+	home          *HomeHandler
 	botUserID     string
 	// typingEmoji は処理中を示すリアクション名(空なら付けない)。
 	typingEmoji string
@@ -80,13 +81,15 @@ type Handler struct {
 
 // NewHandler はHandlerを構築します。botTokenはSlack Web API呼び出し(chat.postMessage等)に使われます。
 // proxyがnilでない場合、対象ユーザー宛のメンションは代理返信フロー(確認DM)に回されます。
-func NewHandler(botToken, signingSecret, typingEmoji string, agent Responder, proxy ProxyReplier) *Handler {
+// homeはApp Homeのタブ表示に使います(nilならapp_home_openedを無視します)。
+func NewHandler(botToken, signingSecret, typingEmoji string, agent Responder, proxy ProxyReplier, home *HomeHandler) *Handler {
 	client := slack.New(botToken)
 	h := &Handler{
 		signingSecret: signingSecret,
 		slackClient:   client,
 		agent:         agent,
 		proxy:         proxy,
+		home:          home,
 		typingEmoji:   typingEmoji,
 	}
 	if auth, err := client.AuthTest(); err == nil {
@@ -182,6 +185,16 @@ func (h *Handler) HandleEvent(event slackevents.EventsAPIEvent, auths []EventAut
 		if h.isTargetPrivateDM(msg, auths) {
 			return
 		}
+	case *slackevents.AppHomeOpenedEvent:
+		// Homeタブは開かれるたびに描き直す。DBの追加指示を毎回読むので常に最新が出る。
+		// messagesタブでも同じイベントが飛んでくるため、tabで絞る。
+		if inner.Tab != "home" {
+			return
+		}
+		if err := h.home.Publish(ctx, inner.User); err != nil {
+			log.Printf("publish app home error: %v", err)
+		}
+		return
 	default:
 		return
 	}

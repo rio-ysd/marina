@@ -13,6 +13,7 @@ import (
 	"github.com/yoshida-rio/marina/internal/agent"
 	"github.com/yoshida-rio/marina/internal/bedrockclient"
 	"github.com/yoshida-rio/marina/internal/config"
+	"github.com/yoshida-rio/marina/internal/instructions"
 	"github.com/yoshida-rio/marina/internal/mfoauth"
 	"github.com/yoshida-rio/marina/internal/morningdigest"
 	"github.com/yoshida-rio/marina/internal/proxyreply"
@@ -48,6 +49,9 @@ func New(cfg *config.Config) (*App, error) {
 	taskRepo := storage.NewTaskRepo(db)
 	reminderRepo := storage.NewReminderRepo(db)
 	conversationRepo := storage.NewConversationRepo(db)
+
+	// App Homeから編集する追加指示。Slackでの応答と朝のダイジェストの両方に差し込む。
+	instructionStore := instructions.NewStore(storage.NewSettingRepo(db))
 
 	taskTools, err := tools.NewTaskTools(taskRepo)
 	if err != nil {
@@ -186,7 +190,7 @@ func New(cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build bedrock client: %w", err)
 	}
-	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo)
+	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo, instructionStore)
 
 	// 代理返信フロー: User OAuthトークンがあり、その持ち主が対象ユーザーと一致する場合のみ有効化する。
 	// 有効でない場合は slack.ProxyReplier をnilのまま渡し、従来どおりmarina自身が応答する。
@@ -207,9 +211,15 @@ func New(cfg *config.Config) (*App, error) {
 		proxyReplier = proxyService
 	}
 
-	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, cfg.SlackTypingEmoji, ag, proxyReplier)
-	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier, userCreationApprover)
-	digestRunner := morningdigest.NewRunner(anthropicClient, cfg.AnthropicModel, gmailClient, slackClient, cfg.MorningDigestSlackChannel)
+	homeHandler := slack.NewHomeHandler(slackClient, instructionStore, cfg.HomeAdminUserID)
+	if cfg.HomeAdminUserID == "" {
+		log.Println("app home instructions are read-only: HOME_ADMIN_SLACK_USER_ID is not set")
+	}
+
+	handler := slack.NewHandler(cfg.SlackBotToken, cfg.SlackSigningSecret, cfg.SlackTypingEmoji, ag, proxyReplier, homeHandler)
+	interactionHandler := slack.NewInteractionHandler(cfg.SlackSigningSecret, proxyReplier, userCreationApprover, homeHandler)
+	digestRunner := morningdigest.NewRunner(anthropicClient, cfg.AnthropicModel, gmailClient, slackClient,
+		cfg.MorningDigestSlackChannel, instructionStore)
 
 	return &App{
 		Config:              cfg,

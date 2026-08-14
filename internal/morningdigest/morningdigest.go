@@ -9,9 +9,16 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/slack-go/slack"
 
+	"github.com/yoshida-rio/marina/internal/instructions"
 	"github.com/yoshida-rio/marina/internal/slackfmt"
 	"github.com/yoshida-rio/marina/internal/tools"
 )
+
+// InstructionProvider はApp Homeで設定された追加指示の本文を返します。
+// internal/instructions.Storeが実装します。取得できない場合は空文字を返します。
+type InstructionProvider interface {
+	Text(ctx context.Context) string
+}
 
 // Slackメッセージ整形用の上限と、Gmailの該当メールを開くURLのプレフィックス。
 const (
@@ -44,15 +51,19 @@ type Runner struct {
 	gmail        tools.GmailClient
 	slackClient  *slack.Client
 	slackChannel string
+	instructions InstructionProvider
 }
 
-func NewRunner(client anthropic.Client, model string, gmail tools.GmailClient, slackClient *slack.Client, slackChannel string) *Runner {
+// NewRunner はRunnerを構築します。
+// customInstructionsはApp Homeで設定された追加指示の供給元です(nil可)。
+func NewRunner(client anthropic.Client, model string, gmail tools.GmailClient, slackClient *slack.Client, slackChannel string, customInstructions InstructionProvider) *Runner {
 	return &Runner{
 		client:       client,
 		model:        anthropic.Model(model),
 		gmail:        gmail,
 		slackClient:  slackClient,
 		slackChannel: slackChannel,
+		instructions: customInstructions,
 	}
 }
 
@@ -160,16 +171,34 @@ const judgementJSONSchema = `{
   "summary": "Slackに送信する朝のダイジェスト要約(日本語)。1トピック1行の箇条書きにし、各行を「・」で始めて改行(\\n)で区切る"
 }`
 
-func (r *Runner) judge(ctx context.Context, emails []tools.EmailSummary) (*judgement, error) {
+// customInstructions はApp Homeで設定された追加指示を返します。未設定なら空文字です。
+func (r *Runner) customInstructions(ctx context.Context) string {
+	if r.instructions == nil {
+		return ""
+	}
+	return r.instructions.Text(ctx)
+}
+
+// judgePrompt は未読メールの判定を依頼するプロンプトを組み立てます。
+// customはApp Homeで設定された追加指示で、既定のルールの後に置きます
+// (「この差出人は既読にしてよい」といった個別ルールで上書きさせるため)。未設定なら何も足しません。
+func judgePrompt(emails []tools.EmailSummary, custom string) string {
 	var sb strings.Builder
 	sb.WriteString("以下は未読メールの一覧です。それぞれについて「既読にしてよい不要なメールか」「返信が必要か」を判断してください。\n")
-	sb.WriteString("返信が必要なものには、丁寧で簡潔な日本語の返信下書きを作成してください。\n\n")
+	sb.WriteString("返信が必要なものには、丁寧で簡潔な日本語の返信下書きを作成してください。")
+	sb.WriteString(instructions.PromptSection(custom))
+	sb.WriteString("\n\n")
 	for _, e := range emails {
-		sb.WriteString(fmt.Sprintf("- id: %s\n  from: %s\n  subject: %s\n  snippet: %s\n", e.ID, e.From, e.Subject, e.Snippet))
+		fmt.Fprintf(&sb, "- id: %s\n  from: %s\n  subject: %s\n  snippet: %s\n", e.ID, e.From, e.Subject, e.Snippet)
 	}
 	sb.WriteString("\nsummaryは件数の羅列ではなく、その日に把握しておくべきことを1トピック1行で簡潔に書いてください。\n")
 	sb.WriteString("以下のJSON形式のみで出力してください。説明文やコードブロックの装飾は不要です。\n")
 	sb.WriteString(judgementJSONSchema)
+	return sb.String()
+}
+
+func (r *Runner) judge(ctx context.Context, emails []tools.EmailSummary) (*judgement, error) {
+	prompt := judgePrompt(emails, r.customInstructions(ctx))
 
 	msg, err := r.client.Beta.Messages.New(ctx, anthropic.BetaMessageNewParams{
 		Model:     r.model,
@@ -178,7 +207,7 @@ func (r *Runner) judge(ctx context.Context, emails []tools.EmailSummary) (*judge
 			Text: "あなたは秘書AIエージェント「marina」です。ユーザーの代わりにメールの要否判断と返信下書き作成を行います。指定されたJSON形式のみで応答してください。",
 		}},
 		Messages: []anthropic.BetaMessageParam{
-			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(sb.String())),
+			anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(prompt)),
 		},
 	})
 	if err != nil {

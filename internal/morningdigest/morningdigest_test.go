@@ -118,3 +118,21 @@ func TestBuildDigestMessageConvertsMarkdown(t *testing.T) {
 		t.Errorf("リンクが壊れている:\n%s", got)
 	}
 }
+
+// App Homeで設定した追加指示が判定プロンプトに載ること。未設定なら何も足さないこと。
+func TestJudgePromptIncludesCustomInstructions(t *testing.T) {
+	emails := []tools.EmailSummary{{ID: "m1", From: "SALON BOARD <no-reply@example.com>", Subject: "予約通知"}}
+
+	got := judgePrompt(emails, "SALON BOARD関連のメールは重要ではないので、既読にするだけでよい")
+	if !strings.Contains(got, "SALON BOARD関連のメールは重要ではないので、既読にするだけでよい") {
+		t.Errorf("prompt should carry the custom instructions, got:\n%s", got)
+	}
+	if !strings.Contains(got, "id: m1") {
+		t.Error("prompt should still list the unread emails")
+	}
+
+	withoutCustom := judgePrompt(emails, "")
+	if strings.Contains(withoutCustom, "追加の運用ルール") {
+		t.Errorf("no instructions should add nothing, got:\n%s", withoutCustom)
+	}
+}
