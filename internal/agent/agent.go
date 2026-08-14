@@ -45,33 +45,15 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 「承認依頼を送りました。承認されると作成されます」と伝え、作成済みとは絶対に言わないでください。
 出力先はSlackなので、太字は**text**ではなく*text*、リンクは<URL|表示文字>の記法を使ってください。見出し記法(#)は使えません。`
 
-// affectionRuleTemplate は「好き」と好意を伝えられたときの返し方の指示です。
-// 素の「好き」はaffectionReplyがClaudeを呼ばずに返すので、こちらは
-// 「ずっと前から好きでした」のような言い回しを取りこぼさないための保険です。
-// 文言が食い違わないよう、返答は判定側と同じ定数から差し込みます。
-const affectionRuleTemplate = `あなたに対して「好き」と好意を伝えられた場合は、他に何も足さず「%s」とだけ返してください。`
-
-// affectionRuleForOwner/affectionRuleForOthers は相手が本人かどうかで変わるため、
-// 発話者に応じてどちらか一方だけをシステムプロンプトへ差し込みます。
-var (
-	affectionRuleForOwner  = fmt.Sprintf(affectionRuleTemplate, affectionReplyForOwner)
-	affectionRuleForOthers = fmt.Sprintf(affectionRuleTemplate, affectionReplyForOthers)
-)
-
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
 var jst = time.FixedZone("JST", 9*60*60)
 
 // systemPromptWithDate は現在日付とApp Homeで設定された追加指示を添えたシステムプロンプトを返します。
 // 日付が無いとClaudeは「今月」「来月」を解決できず、ツールを無駄に呼び続けてしまいます。
-// speakerIsOwnerは発話者が本人かどうかで、好意を伝えられたときの返し方を切り替えるのに使います。
 // customが空の場合は何も足しません。
-func systemPromptWithDate(now time.Time, custom string, speakerIsOwner bool) string {
-	affection := affectionRuleForOthers
-	if speakerIsOwner {
-		affection = affectionRuleForOwner
-	}
-	return fmt.Sprintf("%s\n\n本日は %s です(JST)。「今月」「来月」「先週」などの相対的な期間はこの日付を基準に解釈してください。\n%s%s",
-		systemPrompt, now.In(jst).Format("2006年1月2日(Mon)"), affection, instructions.PromptSection(custom))
+func systemPromptWithDate(now time.Time, custom string) string {
+	return fmt.Sprintf("%s\n\n本日は %s です(JST)。「今月」「来月」「先週」などの相対的な期間はこの日付を基準に解釈してください。%s",
+		systemPrompt, now.In(jst).Format("2006年1月2日(Mon)"), instructions.PromptSection(custom))
 }
 
 // replyOrFallback は空の応答をそのまま返さないようにします。
@@ -168,7 +150,7 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 		BetaMessageNewParams: anthropic.BetaMessageNewParams{
 			Model:     a.model,
 			MaxTokens: 2048,
-			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now(), a.customInstructions(ctx), a.isOwner(user))}},
+			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now(), a.customInstructions(ctx))}},
 			Messages:  messages,
 		},
 		MaxIterations: maxToolIterations,
