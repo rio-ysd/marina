@@ -68,7 +68,7 @@ func TestSystemPromptIncludesJSTDate(t *testing.T) {
 	// UTCでは前日になる時刻。JSTで解釈されていれば8月14日になる。
 	utcNight := time.Date(2026, 8, 13, 20, 30, 0, 0, time.UTC)
 
-	got := systemPromptWithDate(utcNight, "")
+	got := systemPromptWithDate(utcNight, "", false)
 
 	if !strings.Contains(got, "2026年8月14日") {
 		t.Errorf("prompt should carry the JST date, got:\n%s", got)
@@ -82,13 +82,50 @@ func TestSystemPromptIncludesJSTDate(t *testing.T) {
 func TestSystemPromptIncludesCustomInstructions(t *testing.T) {
 	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
 
-	got := systemPromptWithDate(now, "SALON BOARD関連のメールは既読にするだけでよい")
+	got := systemPromptWithDate(now, "SALON BOARD関連のメールは既読にするだけでよい", false)
 	if !strings.Contains(got, "SALON BOARD関連のメールは既読にするだけでよい") {
 		t.Errorf("prompt should carry the custom instructions, got:\n%s", got)
 	}
 
-	withoutCustom := systemPromptWithDate(now, "   ")
+	withoutCustom := systemPromptWithDate(now, "   ", false)
 	if strings.Contains(withoutCustom, "追加の運用ルール") {
 		t.Errorf("blank instructions should add nothing, got:\n%s", withoutCustom)
+	}
+}
+
+// 「好き」への返し方が発話者によって切り替わること(本人だけ「大好き」)。
+func TestSystemPromptSwitchesAffectionRuleBySpeaker(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+
+	owner := systemPromptWithDate(now, "", true)
+	if !strings.Contains(owner, "大好き") {
+		t.Errorf("owner prompt should tell marina to reply 大好き, got:\n%s", owner)
+	}
+	if strings.Contains(owner, "セクハラ") {
+		t.Errorf("owner prompt should not carry the harassment reply, got:\n%s", owner)
+	}
+
+	other := systemPromptWithDate(now, "", false)
+	if !strings.Contains(other, "セクハラです。やめて下さい") {
+		t.Errorf("non-owner prompt should tell marina to refuse, got:\n%s", other)
+	}
+	if strings.Contains(other, "大好き") {
+		t.Errorf("non-owner prompt should not carry the affectionate reply, got:\n%s", other)
+	}
+}
+
+// 本人判定はPROXY_REPLY_TARGET_USER_IDと一致したときだけ成立し、未設定なら誰も本人扱いしないこと。
+func TestIsOwner(t *testing.T) {
+	withOwner := &Agent{ownerUserID: "U123"}
+	if !withOwner.isOwner("U123") {
+		t.Error("target user should be treated as the owner")
+	}
+	if withOwner.isOwner("U999") {
+		t.Error("other users should not be treated as the owner")
+	}
+
+	withoutOwner := &Agent{}
+	if withoutOwner.isOwner("U123") || withoutOwner.isOwner("") {
+		t.Error("nobody should be the owner when PROXY_REPLY_TARGET_USER_ID is unset")
 	}
 }

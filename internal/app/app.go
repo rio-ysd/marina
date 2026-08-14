@@ -190,7 +190,7 @@ func New(cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build bedrock client: %w", err)
 	}
-	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo, instructionStore)
+	ag := agent.New(anthropicClient, cfg.AnthropicModel, allTools, conversationRepo, instructionStore, cfg.ProxyReplyTargetUserID)
 
 	// 代理返信フロー: User OAuthトークンがあり、その持ち主が対象ユーザーと一致する場合のみ有効化する。
 	// 有効でない場合は slack.ProxyReplier をnilのまま渡し、従来どおりmarina自身が応答する。
