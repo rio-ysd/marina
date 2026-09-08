@@ -36,7 +36,7 @@ func NewStaffAttendanceSummaryTools(db *sql.DB, cameraClient CameraNotifyHistory
 			if err != nil {
 				return textResult(fmt.Sprintf("調査に失敗しました: %v", err)), nil
 			}
-			return textResult(text), nil
+			return verbatimResult(text), nil
 		},
 	)
 	if err != nil {

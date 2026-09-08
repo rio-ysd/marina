@@ -48,7 +48,7 @@ func NewDQLShiftComplianceTools(db *sql.DB) ([]anthropic.BetaTool, error) {
 			if err != nil {
 				return textResult(fmt.Sprintf("調査に失敗しました: %v", err)), nil
 			}
-			return textResult(text), nil
+			return verbatimResult(text), nil
 		},
 	)
 	if err != nil {
@@ -372,4 +372,12 @@ func ambiguousStaffMessage(name string, candidates []dqlStaff) string {
 		b.WriteString("- " + s.label() + "\n")
 	}
 	return b.String()
+}
+
+// verbatimResult は数値を含むツール結果を、Claudeが計算し直したり言い換えたりしないよう強い注意を付けて返します。
+// system promptの一般的な指示だけでは数値が書き換わってしまうことがあったため、データの直前に埋め込む。
+func verbatimResult(text string) anthropic.BetaToolResultBlockParamContentUnion {
+	const notice = "重要: 以下は一字一句そのままSlackへの返信に使ってください。" +
+		"時刻・時間差・日付を自分で計算し直したり、要約したりしないでください(変更すると誤りになります)。\n\n"
+	return textResult(notice + text)
 }
