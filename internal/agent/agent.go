@@ -54,6 +54,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 check_staff_attendance_summaryの結果は、時刻や差分を自分で計算し直したり要約したりせず、ツールが返したテキストを
 インデント付き箇条書きの構造そのままで出力してください(数値の書き換え・言い換えは誤りのもとになります)。
 複数人分をまとめる場合も、各ツール呼び出しの出力をそのまま連結するだけにしてください。
+**最重要**: check_staff_attendance_summaryとdql_check_shift_complianceが返す時刻・時間差・日付は、
+一字一句そのまま転記してください。文章を書き直す過程で数値を推測・再計算・丸め直すことは絶対にしないでください。
+自分の暗算や記憶ではなくツールの出力そのものが常に正しいので、ツールの文字列をコピーするように扱ってください。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
 重要: dqlのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
