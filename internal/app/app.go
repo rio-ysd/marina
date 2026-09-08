@@ -177,12 +177,13 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build mf invoice tools: %w", err)
 	}
 
-	// db_select_queryはmarina自身のDBではなく、DB_HOST/DB_NAME/DB_USER/DB_PASSで指定された
-	// 外部DB(dql)を対象にする。4つとも設定されている場合のみツールを登録する。
+	// db_select_queryはmarina自身のDBではなく、DB_HOST/DB_USER/DB_PASSで指定された
+	// 外部DB(dql、beryx_productionなど複数のスキーマ)を対象にする。3つとも設定されている場合のみツールを登録する。
+	// デフォルトデータベースは選択せず、クエリ側で`データベース名.テーブル名`と完全修飾させる。
 	var dbQueryTools []anthropic.BetaTool
 	if cfg.HasExternalDBCredentials() {
-		externalDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?parseTime=true&loc=Local",
-			cfg.ExternalDBUser, cfg.ExternalDBPass, cfg.ExternalDBHost, cfg.ExternalDBName)
+		externalDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/?parseTime=true&loc=Local",
+			cfg.ExternalDBUser, cfg.ExternalDBPass, cfg.ExternalDBHost)
 		externalDB, err := storage.NewDB(externalDSN)
 		if err != nil {
 			return nil, fmt.Errorf("connect external db: %w", err)
@@ -192,7 +193,7 @@ func New(cfg *config.Config) (*App, error) {
 			return nil, fmt.Errorf("build db query tools: %w", err)
 		}
 	} else {
-		log.Println("db query tool disabled: DB_HOST/DB_NAME/DB_USER/DB_PASS is not set")
+		log.Println("db query tool disabled: DB_HOST/DB_USER/DB_PASS is not set")
 	}
 
 	// 監視カメラ通知チャンネルの取得はUser OAuthトークン(groups:history)が必要なので、

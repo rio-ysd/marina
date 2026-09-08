@@ -74,11 +74,12 @@ type Config struct {
 	CameraNotifyChannelID string
 	CameraNotifyUserID    string
 
-	// ExternalDBHost/Name/User/Pass はdb_select_queryツールが問い合わせる外部DBの接続情報。
-	// marina自身のアプリDB(DB_DSN)とは別のMySQL互換データベース。
-	// 4つすべて設定されている場合のみツールを登録する。
+	// ExternalDBHost/User/Pass はdb_select_queryツールが問い合わせる外部DB(MySQL)の接続情報。
+	// marina自身のアプリDB(DB_DSN)とは別のサーバ。
+	// 接続時にデフォルトデータベースは選択せず、同じ認証情報で複数データベース(例: dql, beryx_production)に
+	// 問い合わせられることを前提としているためDB_NAMEは不要。
+	// 3つすべて設定されている場合のみツールを登録する。
 	ExternalDBHost string
-	ExternalDBName string
 	ExternalDBUser string
 	ExternalDBPass string
 }
@@ -114,7 +115,6 @@ func Load() (*Config, error) {
 		CameraNotifyChannelID:       strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_CHANNEL_ID")),
 		CameraNotifyUserID:          strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_USER_ID")),
 		ExternalDBHost:              strings.TrimSpace(os.Getenv("DB_HOST")),
-		ExternalDBName:              strings.TrimSpace(os.Getenv("DB_NAME")),
 		ExternalDBUser:              strings.TrimSpace(os.Getenv("DB_USER")),
 		ExternalDBPass:              os.Getenv("DB_PASS"),
 	}
@@ -148,7 +148,7 @@ func (c *Config) HasMFCredentials() bool {
 
 // HasExternalDBCredentials はdb_select_queryツールが問い合わせる外部DBの接続情報が揃っているかを返します。
 func (c *Config) HasExternalDBCredentials() bool {
-	return c.ExternalDBHost != "" && c.ExternalDBName != "" && c.ExternalDBUser != "" && c.ExternalDBPass != ""
+	return c.ExternalDBHost != "" && c.ExternalDBUser != "" && c.ExternalDBPass != ""
 }
 
 func getEnvDefault(key, def string) string {

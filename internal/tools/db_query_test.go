@@ -26,8 +26,15 @@ func TestValidateSelectQueryRejectsNonSelect(t *testing.T) {
 	}
 }
 
-func TestValidateSelectQueryRejectsDeniedTable(t *testing.T) {
-	if _, err := validateSelectQuery("SELECT access_token FROM oauth_tokens"); err == nil {
-		t.Error("expected error for oauth_tokens table, got nil")
+func TestValidateSelectQueryRejectsDeniedPatterns(t *testing.T) {
+	for _, q := range []string{
+		"SELECT access_token FROM oauth_tokens",
+		"SELECT private_key FROM projects",
+		"SELECT public_key FROM projects",
+		"SELECT password FROM users",
+	} {
+		if _, err := validateSelectQuery(q); err == nil {
+			t.Errorf("validateSelectQuery(%q) expected error, got nil", q)
+		}
 	}
 }

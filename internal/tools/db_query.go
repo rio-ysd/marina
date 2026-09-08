@@ -17,8 +17,9 @@ const dbSelectMaxRows = 200
 // dbSelectQueryTimeout は1クエリあたりの実行時間の上限です。
 const dbSelectQueryTimeout = 10 * time.Second
 
-// dbSelectDeniedTables はトークンなど機密情報を含むため、問い合わせを許可しないテーブルです。
-var dbSelectDeniedTables = []string{"oauth_tokens"}
+// dbSelectDeniedPatterns は機密情報(認証情報・秘密鍵等)を含むため、問い合わせを許可しないテーブル/カラム名です。
+// クエリ文字列に部分一致するかで判定します。
+var dbSelectDeniedPatterns = []string{"oauth_tokens", "private_key", "public_key", "password"}
 
 type dbSelectQueryInput struct {
 	Query string `json:"query"`
@@ -29,6 +30,8 @@ func NewDBQueryTools(db *sql.DB) ([]anthropic.BetaTool, error) {
 	tool, err := toolrunner.NewBetaToolFromBytes[dbSelectQueryInput](
 		"db_select_query",
 		"外部DBに対してSELECT文を1つだけ実行し、結果を返す(最大"+fmt.Sprint(dbSelectMaxRows)+"行)。"+
+			"接続時にデフォルトのデータベースは選択されていないため、テーブル名は必ず`データベース名.テーブル名`"+
+			"(例: dql.shifts, beryx_production.projects)の形式で指定する。"+
 			"SELECT以外の文やセミコロン区切りの複数文は実行できない。テーブル構造が不明な場合はSHOW TABLES/DESCRIBEではなく"+
 			"information_schema.columnsをSELECTで調べる。",
 		mustSchema(map[string]any{
@@ -77,9 +80,9 @@ func validateSelectQuery(query string) (string, error) {
 		}
 	}
 	lower := strings.ToLower(trimmed)
-	for _, table := range dbSelectDeniedTables {
-		if strings.Contains(lower, table) {
-			return "", fmt.Errorf("%sテーブルは機密情報を含むため問い合わせできません。", table)
+	for _, pattern := range dbSelectDeniedPatterns {
+		if strings.Contains(lower, pattern) {
+			return "", fmt.Errorf("%sを含む問い合わせは機密情報保護のため実行できません。", pattern)
 		}
 	}
 	return trimmed, nil

@@ -45,12 +45,18 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 「承認依頼を送りました。承認されると作成されます」と伝え、作成済みとは絶対に言わないでください。
 監視カメラの通知が何時に届いたか聞かれたらget_camera_notification_time_rangeを使い、日付はYYYY-MM-DD(JST)で渡してください。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
-db_select_queryの問い合わせ先はサロン予約管理システム「dql」のDBです。主なテーブルの知識:
-- shifts: shift_date(YYYY-MM-DD文字列)とshift_hour(その日0時からの分数。例: 540=9:00, 570=9:30)の組み合わせが
-  30分単位のシフト1コマを表す。1人のスタッフの1日のシフトは複数行になる。user_idでusersに紐づく。
-- users: name(名)/last_name(姓)を持つ。スタッフも顧客もこのテーブルに入る。姓だけで検索すると同姓の別人が
+db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
+「dql」はサロン予約管理システムのDBです。主なテーブルの知識:
+- dql.shifts: shift_date(YYYY-MM-DD文字列)とshift_hour(その日0時からの分数。例: 540=9:00, 570=9:30)の組み合わせが
+  30分単位のシフト1コマを表す。1人のスタッフの1日のシフトは複数行になる。user_idでdql.usersに紐づく。
+- dql.users: name(名)/last_name(姓)を持つ。スタッフも顧客もこのテーブルに入る。姓だけで検索すると同姓の別人が
   複数ヒットすることがあるため、該当者が複数いる場合は下の名前を確認するか候補を提示してから答えてください。
-- admins: user_idでusersと1:1。slack_user_id(Slackユーザーの識別子)やrole(役割)を持ち、スタッフ判定に使う。
+- dql.admins: user_idでusersと1:1。slack_user_id(Slackユーザーの識別子)やrole(役割)を持ち、スタッフ判定に使う。
+「beryx_production」は勤怠管理システムのDBです。主なテーブルの知識:
+- beryx_production.users: 社員。id/name/email/join_company_at(入社日)を持つ。
+- beryx_production.projects: 案件。client_id/name/started_at/ended_at/budgetなどを持つ。
+- beryx_production.members: usersとprojectsの中間テーブル(アサイン)。user_id/project_id/assigned_at/completed_atを持つ。
+- beryx_production.reports: 勤怠の稼働報告。member_idで紐づき、started_at/ended_at/rest_time(休憩時間)を持つ。
 出力先はSlackなので、太字は**text**ではなく*text*、リンクは<URL|表示文字>の記法を使ってください。見出し記法(#)は使えません。`
 
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
