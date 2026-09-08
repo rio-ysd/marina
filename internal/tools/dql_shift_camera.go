@@ -98,14 +98,12 @@ func buildStaffAttendanceSummary(ctx context.Context, db *sql.DB, cameraClient C
 		camFirst = camFirst.In(cameraNotifyJST)
 		camLast = camLast.In(cameraNotifyJST)
 		b.WriteString(fmt.Sprintf("      - 防犯センサー %s〜%s\n", camFirst.Format("15:04"), camLast.Format("15:04")))
+		// 開始が実働より早い/終了が実働より遅いのは正常な範囲(出勤前・退勤後の検知)なので記載しない。
+		// 異常の兆候である「開始が遅い」「終了が早い」のみ記載する。
 		if startDiff := camFirst.Sub(v.start); startDiff > 0 {
 			b.WriteString(fmt.Sprintf("        - 開始%s遅い\n", formatDurationJa(startDiff)))
-		} else if startDiff < 0 {
-			b.WriteString(fmt.Sprintf("        - 開始%s早い\n", formatDurationJa(-startDiff)))
 		}
-		if endDiff := camLast.Sub(v.end); endDiff > 0 {
-			b.WriteString(fmt.Sprintf("        - 終了%s遅い\n", formatDurationJa(endDiff)))
-		} else if endDiff < 0 {
+		if endDiff := camLast.Sub(v.end); endDiff < 0 {
 			b.WriteString(fmt.Sprintf("        - 終了%s早い\n", formatDurationJa(-endDiff)))
 		}
 	}
