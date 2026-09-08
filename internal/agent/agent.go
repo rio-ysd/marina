@@ -48,6 +48,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 (氏名解決・UTC/JST変換・シフトとのJOINをツール内で完結させるため、db_select_queryで都度組み立てるより速く確実です)。
 対象者がdqlではニックネーム(例: MAHO)で呼ばれている場合、beryx_productionには本名(例: 鈴木瑞希)で登録されているため、
 本名が分かっていればberyx_nameに渡してください(省略するとnameと同じ値で検索し、見つからなければ本名を尋ねてください)。
+シフト時間外の実働に加えて防犯センサー(監視カメラ)の検知時刻も合わせて知りたい場合はcheck_staff_attendance_summaryを
+使ってください(引数はdql_check_shift_complianceと同じname/beryx_name/from/to)。複数人分をまとめて聞かれた場合は
+人ごとに呼び出し、結果を1つのSlackメッセージにまとめてください。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
 重要: dqlのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。

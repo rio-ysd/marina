@@ -71,6 +71,14 @@ func (s dqlStaff) label() string {
 	return fmt.Sprintf("%s(dql id=%d)", s.name, s.id)
 }
 
+// plainName はID等を含まない表示名(姓名またはニックネーム)を返します。
+func (s dqlStaff) plainName() string {
+	if s.lastName.Valid && s.lastName.String != "" {
+		return s.lastName.String + s.name
+	}
+	return s.name
+}
+
 // findDQLStaff はdql.adminsにレコードがあるusersのみを対象に名前の部分一致で検索します。
 func findDQLStaff(ctx context.Context, db *sql.DB, name string) ([]dqlStaff, error) {
 	like := "%" + name + "%"
@@ -153,21 +161,35 @@ type dqlShiftViolation struct {
 	endMin   sql.NullInt64
 }
 
-func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, fromStr, toStr string) (string, error) {
+// shiftComplianceResolution はシフト遵守チェックの解決結果です。
+// Messageが空でない場合は氏名解決が失敗/曖昧だったことを示し、それをそのままユーザーへ返します。
+type shiftComplianceResolution struct {
+	Message    string
+	DQLStaff   dqlStaff
+	BeryxUser  beryxUser
+	From       string
+	To         string
+	Total      int
+	Violations []dqlShiftViolation
+}
+
+// resolveShiftViolations は氏名解決からシフト時間外の実働抽出までを行います。
+// dql_check_shift_complianceと防犯センサー付きサマリの両方から共通で使います。
+func resolveShiftViolations(ctx context.Context, db *sql.DB, name, beryxName, fromStr, toStr string) (shiftComplianceResolution, error) {
 	from, to, err := resolveDQLDateRange(fromStr, toStr)
 	if err != nil {
-		return "", err
+		return shiftComplianceResolution{}, err
 	}
 
 	dqlCandidates, err := findDQLStaff(ctx, db, name)
 	if err != nil {
-		return "", err
+		return shiftComplianceResolution{}, err
 	}
 	if len(dqlCandidates) == 0 {
-		return fmt.Sprintf("「%s」に該当するシフト予定(dql.admins登録スタッフ)が見つかりませんでした。", name), nil
+		return shiftComplianceResolution{Message: fmt.Sprintf("「%s」に該当するシフト予定(dql.admins登録スタッフ)が見つかりませんでした。", name)}, nil
 	}
 	if len(dqlCandidates) > 1 {
-		return ambiguousStaffMessage(name, dqlCandidates), nil
+		return shiftComplianceResolution{Message: ambiguousStaffMessage(name, dqlCandidates)}, nil
 	}
 	dqlStaffMatch := dqlCandidates[0]
 
@@ -176,10 +198,10 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 	}
 	beryxCandidates, err := findBeryxUser(ctx, db, beryxName)
 	if err != nil {
-		return "", err
+		return shiftComplianceResolution{}, err
 	}
 	if len(beryxCandidates) == 0 {
-		return fmt.Sprintf("「%s」に該当する実働記録(beryx_production.users)が見つかりませんでした。dqlのニックネームと本名が異なる場合はberyx_nameで本名を指定してください。", beryxName), nil
+		return shiftComplianceResolution{Message: fmt.Sprintf("「%s」に該当する実働記録(beryx_production.users)が見つかりませんでした。dqlのニックネームと本名が異なる場合はberyx_nameで本名を指定してください。", beryxName)}, nil
 	}
 	if len(beryxCandidates) > 1 {
 		var b strings.Builder
@@ -187,11 +209,10 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 		for _, u := range beryxCandidates {
 			b.WriteString(fmt.Sprintf("- %s(beryx id=%d)\n", u.name, u.id))
 		}
-		return b.String(), nil
+		return shiftComplianceResolution{Message: b.String()}, nil
 	}
 	beryxUserMatch := beryxCandidates[0]
 
-	// reports.started_at/ended_atはUTC保存のため、JSTの[from, to]の日境界をUTCへ変換して絞り込む。
 	// beryx_production.reports.started_at/ended_atは(dqlのDATETIME列と異なり)JSTでそのまま保存されているため変換不要。
 	// shift_dateはJSTの日付そのままなので、started_atをそのままDATE()で日付比較する。
 	rows, err := db.QueryContext(ctx, `
@@ -210,7 +231,7 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 		ORDER BY r.started_at`,
 		dqlStaffMatch.id, beryxUserMatch.id, from, to)
 	if err != nil {
-		return "", fmt.Errorf("query reports: %w", err)
+		return shiftComplianceResolution{}, fmt.Errorf("query reports: %w", err)
 	}
 	defer rows.Close()
 
@@ -219,7 +240,7 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 	for rows.Next() {
 		var v dqlShiftViolation
 		if err := rows.Scan(&v.start, &v.end, &v.startMin, &v.endMin); err != nil {
-			return "", err
+			return shiftComplianceResolution{}, err
 		}
 		total++
 		if isOutsideShift(v) {
@@ -227,21 +248,40 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return "", err
+		return shiftComplianceResolution{}, err
 	}
 
-	staffLabel := fmt.Sprintf("%s / %s(beryx id=%d)", dqlStaffMatch.label(), beryxUserMatch.name, beryxUserMatch.id)
-	rangeLabel := fmt.Sprintf("%sから%s", from, to)
-	if total == 0 {
+	return shiftComplianceResolution{
+		DQLStaff:   dqlStaffMatch,
+		BeryxUser:  beryxUserMatch,
+		From:       from,
+		To:         to,
+		Total:      total,
+		Violations: violations,
+	}, nil
+}
+
+func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, fromStr, toStr string) (string, error) {
+	res, err := resolveShiftViolations(ctx, db, name, beryxName, fromStr, toStr)
+	if err != nil {
+		return "", err
+	}
+	if res.Message != "" {
+		return res.Message, nil
+	}
+
+	staffLabel := fmt.Sprintf("%s / %s(beryx id=%d)", res.DQLStaff.label(), res.BeryxUser.name, res.BeryxUser.id)
+	rangeLabel := fmt.Sprintf("%sから%s", res.From, res.To)
+	if res.Total == 0 {
 		return fmt.Sprintf("%sの%sの実働記録(beryx_production.reports)はありませんでした。", staffLabel, rangeLabel), nil
 	}
-	if len(violations) == 0 {
-		return fmt.Sprintf("%sの%s(実働記録%d件)は、すべてシフト時間内でした。", staffLabel, rangeLabel, total), nil
+	if len(res.Violations) == 0 {
+		return fmt.Sprintf("%sの%s(実働記録%d件)は、すべてシフト時間内でした。", staffLabel, rangeLabel, res.Total), nil
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("%sの%s(実働記録%d件)のうち、シフト時間外の勤務が%d件見つかりました:\n", staffLabel, rangeLabel, total, len(violations)))
-	for _, v := range violations {
+	b.WriteString(fmt.Sprintf("%sの%s(実働記録%d件)のうち、シフト時間外の勤務が%d件見つかりました:\n", staffLabel, rangeLabel, res.Total, len(res.Violations)))
+	for _, v := range res.Violations {
 		shiftLabel := "その日はシフト登録なし"
 		if v.startMin.Valid {
 			shiftLabel = "シフトは" + formatMinuteRange(v.startMin.Int64, v.endMin.Int64)

@@ -182,10 +182,11 @@ func New(cfg *config.Config) (*App, error) {
 	// デフォルトデータベースは選択せず、クエリ側で`データベース名.テーブル名`と完全修飾させる。
 	var dbQueryTools []anthropic.BetaTool
 	var dqlShiftTools []anthropic.BetaTool
+	var externalDB *sql.DB
 	if cfg.HasExternalDBCredentials() {
 		externalDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/?parseTime=true&loc=Local",
 			cfg.ExternalDBUser, cfg.ExternalDBPass, cfg.ExternalDBHost)
-		externalDB, err := storage.NewDB(externalDSN)
+		externalDB, err = storage.NewDB(externalDSN)
 		if err != nil {
 			return nil, fmt.Errorf("connect external db: %w", err)
 		}
@@ -204,7 +205,8 @@ func New(cfg *config.Config) (*App, error) {
 	// 監視カメラ通知チャンネルの取得はUser OAuthトークン(groups:history)が必要なので、
 	// SlackUserOAuthTokenと対象チャンネル/ユーザーIDがすべて設定されている場合のみ登録する。
 	var cameraNotifyTools []anthropic.BetaTool
-	if cfg.SlackUserOAuthToken != "" && cfg.CameraNotifyChannelID != "" && cfg.CameraNotifyUserID != "" {
+	hasCameraCredentials := cfg.SlackUserOAuthToken != "" && cfg.CameraNotifyChannelID != "" && cfg.CameraNotifyUserID != ""
+	if hasCameraCredentials {
 		cameraNotifyTools, err = tools.NewCameraNotifyTools(slackapi.New(cfg.SlackUserOAuthToken), cfg.CameraNotifyChannelID, cfg.CameraNotifyUserID)
 		if err != nil {
 			return nil, fmt.Errorf("build camera notify tools: %w", err)
@@ -213,11 +215,21 @@ func New(cfg *config.Config) (*App, error) {
 		log.Println("camera notify tool disabled: SLACK_USER_OAUTH_TOKEN/CAMERA_NOTIFY_CHANNEL_ID/CAMERA_NOTIFY_USER_ID is not set")
 	}
 
+	// シフト×防犯センサーの突き合わせサマリは、外部DBと監視カメラの両方が使える場合のみ登録する。
+	var staffAttendanceSummaryTools []anthropic.BetaTool
+	if externalDB != nil && hasCameraCredentials {
+		staffAttendanceSummaryTools, err = tools.NewStaffAttendanceSummaryTools(
+			externalDB, slackapi.New(cfg.SlackUserOAuthToken), cfg.CameraNotifyChannelID, cfg.CameraNotifyUserID)
+		if err != nil {
+			return nil, fmt.Errorf("build staff attendance summary tools: %w", err)
+		}
+	}
+
 	// ツールの並び順はClaudeへの提示順。連携が増えたら追加するだけで済むようにまとめて連結する。
 	var allTools []anthropic.BetaTool
 	for _, set := range [][]anthropic.BetaTool{
 		taskTools, reminderTools, gmailTools, driveTools, calendarTools, sheetsTools,
-		peopleTools, directoryTools, mfTools, cameraNotifyTools, dbQueryTools, dqlShiftTools,
+		peopleTools, directoryTools, mfTools, cameraNotifyTools, dbQueryTools, dqlShiftTools, staffAttendanceSummaryTools,
 	} {
 		allTools = append(allTools, set...)
 	}
