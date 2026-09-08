@@ -50,9 +50,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 本名が分かっていればberyx_nameに渡してください(省略するとnameと同じ値で検索し、見つからなければ本名を尋ねてください)。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
-重要: dql/beryx_productionのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
+重要: dqlのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
 JSTの時刻と比較・表示する際は必ずDATE_ADD(列名, INTERVAL 9 HOUR)で変換してください(変換を忘れると実際より9時間早い時刻に見えます)。
-一方dql.shifts.shift_hourはUTC変換が不要な、その日0時からの分数(JST)としてそのまま保存されています。
+一方dql.shifts.shift_hourとberyx_production.reportsのDATETIME列(started_at, ended_at)はJSTでそのまま保存されており変換不要です。
 「dql」はサロン予約管理システムのDBです。主なテーブルの知識:
 - dql.shifts: shift_date(YYYY-MM-DD文字列)とshift_hour(その日0時からの分数。例: 540=9:00, 570=9:30)の組み合わせが
   30分単位のシフト1コマを表す。1人のスタッフの1日のシフトは複数行になる。user_idでdql.usersに紐づく。
@@ -69,9 +69,9 @@ JSTの時刻と比較・表示する際は必ずDATE_ADD(列名, INTERVAL 9 HOUR
 - beryx_production.users: 社員。id/name/email/join_company_at(入社日)を持つ。dqlのスタッフも別IDでここに登録されている。
 - beryx_production.projects: 案件。client_id/name/started_at/ended_at/budgetなどを持つ。
 - beryx_production.members: usersとprojectsの中間テーブル(アサイン)。user_id/project_id/assigned_at/completed_atを持つ。
-- beryx_production.reports: **実際の稼働時間の記録**。member_idで紐づき、started_at/ended_at(いずれもUTC)/rest_time
-  (休憩時間)を持つ。「シフト時間外に働いているか」を調べるときは、dql.shifts(シフト予定)とこのreports
-  (全プロジェクト合算の実働)を突き合わせる(dql.reservations/user_store_presencesは実働の判定には使わない)。
+- beryx_production.reports: **実際の稼働時間の記録**。member_idで紐づき、started_at/ended_at(JSTでそのまま保存、
+  UTC変換不要)/rest_time(休憩時間)を持つ。「シフト時間外に働いているか」を調べるときは、dql.shifts(シフト予定)と
+  このreports(全プロジェクト合算の実働)を突き合わせる(dql.reservations/user_store_presencesは実働の判定には使わない)。
 出力先はSlackなので、太字は**text**ではなく*text*、リンクは<URL|表示文字>の記法を使ってください。見出し記法(#)は使えません。`
 
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。

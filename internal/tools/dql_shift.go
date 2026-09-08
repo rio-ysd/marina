@@ -192,11 +192,10 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 	beryxUserMatch := beryxCandidates[0]
 
 	// reports.started_at/ended_atはUTC保存のため、JSTの[from, to]の日境界をUTCへ変換して絞り込む。
-	// shift_dateはJSTの日付そのままなので、started_atをJSTへ戻してから突き合わせる。
+	// beryx_production.reports.started_at/ended_atは(dqlのDATETIME列と異なり)JSTでそのまま保存されているため変換不要。
+	// shift_dateはJSTの日付そのままなので、started_atをそのままDATE()で日付比較する。
 	rows, err := db.QueryContext(ctx, `
-		SELECT DATE_ADD(r.started_at, INTERVAL 9 HOUR) AS jst_start,
-		       DATE_ADD(r.ended_at, INTERVAL 9 HOUR) AS jst_end,
-		       sh.start_min, sh.end_min
+		SELECT r.started_at, r.ended_at, sh.start_min, sh.end_min
 		FROM beryx_production.reports r
 		JOIN beryx_production.members m ON m.id = r.member_id
 		LEFT JOIN (
@@ -204,10 +203,10 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 			FROM dql.shifts
 			WHERE user_id = ?
 			GROUP BY shift_date
-		) sh ON sh.shift_date = DATE(DATE_ADD(r.started_at, INTERVAL 9 HOUR))
+		) sh ON sh.shift_date = DATE(r.started_at)
 		WHERE m.user_id = ?
-		  AND r.started_at >= DATE_SUB(?, INTERVAL 9 HOUR)
-		  AND r.started_at <  DATE_SUB(DATE_ADD(?, INTERVAL 1 DAY), INTERVAL 9 HOUR)
+		  AND r.started_at >= ?
+		  AND r.started_at <  DATE_ADD(?, INTERVAL 1 DAY)
 		ORDER BY r.started_at`,
 		dqlStaffMatch.id, beryxUserMatch.id, from, to)
 	if err != nil {
