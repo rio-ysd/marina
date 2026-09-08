@@ -177,6 +177,24 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build mf invoice tools: %w", err)
 	}
 
+	// db_select_queryはmarina自身のDBではなく、DB_HOST/DB_NAME/DB_USER/DB_PASSで指定された
+	// 外部DB(dql)を対象にする。4つとも設定されている場合のみツールを登録する。
+	var dbQueryTools []anthropic.BetaTool
+	if cfg.HasExternalDBCredentials() {
+		externalDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?parseTime=true&loc=Local",
+			cfg.ExternalDBUser, cfg.ExternalDBPass, cfg.ExternalDBHost, cfg.ExternalDBName)
+		externalDB, err := storage.NewDB(externalDSN)
+		if err != nil {
+			return nil, fmt.Errorf("connect external db: %w", err)
+		}
+		dbQueryTools, err = tools.NewDBQueryTools(externalDB)
+		if err != nil {
+			return nil, fmt.Errorf("build db query tools: %w", err)
+		}
+	} else {
+		log.Println("db query tool disabled: DB_HOST/DB_NAME/DB_USER/DB_PASS is not set")
+	}
+
 	// 監視カメラ通知チャンネルの取得はUser OAuthトークン(groups:history)が必要なので、
 	// SlackUserOAuthTokenと対象チャンネル/ユーザーIDがすべて設定されている場合のみ登録する。
 	var cameraNotifyTools []anthropic.BetaTool
@@ -193,7 +211,7 @@ func New(cfg *config.Config) (*App, error) {
 	var allTools []anthropic.BetaTool
 	for _, set := range [][]anthropic.BetaTool{
 		taskTools, reminderTools, gmailTools, driveTools, calendarTools, sheetsTools,
-		peopleTools, directoryTools, mfTools, cameraNotifyTools,
+		peopleTools, directoryTools, mfTools, cameraNotifyTools, dbQueryTools,
 	} {
 		allTools = append(allTools, set...)
 	}

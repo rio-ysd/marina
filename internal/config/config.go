@@ -73,6 +73,14 @@ type Config struct {
 	// (対象がプライベートチャンネルのため、groups:historyスコープを持つUser OAuthトークンが必要)。
 	CameraNotifyChannelID string
 	CameraNotifyUserID    string
+
+	// ExternalDBHost/Name/User/Pass はdb_select_queryツールが問い合わせる外部DBの接続情報。
+	// marina自身のアプリDB(DB_DSN)とは別のMySQL互換データベース。
+	// 4つすべて設定されている場合のみツールを登録する。
+	ExternalDBHost string
+	ExternalDBName string
+	ExternalDBUser string
+	ExternalDBPass string
 }
 
 // Load は環境変数からConfigを構築します。必須項目が欠けている場合はerrorを返します。
@@ -105,6 +113,10 @@ func Load() (*Config, error) {
 		ProxyReplyIncludeDM:         getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
 		CameraNotifyChannelID:       strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_CHANNEL_ID")),
 		CameraNotifyUserID:          strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_USER_ID")),
+		ExternalDBHost:              strings.TrimSpace(os.Getenv("DB_HOST")),
+		ExternalDBName:              strings.TrimSpace(os.Getenv("DB_NAME")),
+		ExternalDBUser:              strings.TrimSpace(os.Getenv("DB_USER")),
+		ExternalDBPass:              os.Getenv("DB_PASS"),
 	}
 
 	required := map[string]string{
@@ -132,6 +144,11 @@ func (c *Config) HasGoogleCredentials() bool {
 // HasMFCredentials はMoneyForward請求書APIの実クライアントが利用可能かを返します。
 func (c *Config) HasMFCredentials() bool {
 	return c.MFClientID != "" && c.MFClientSecret != "" && c.MFOAuthRedirectURI != ""
+}
+
+// HasExternalDBCredentials はdb_select_queryツールが問い合わせる外部DBの接続情報が揃っているかを返します。
+func (c *Config) HasExternalDBCredentials() bool {
+	return c.ExternalDBHost != "" && c.ExternalDBName != "" && c.ExternalDBUser != "" && c.ExternalDBPass != ""
 }
 
 func getEnvDefault(key, def string) string {

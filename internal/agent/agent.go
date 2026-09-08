@@ -44,6 +44,7 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 アカウント作成を頼まれた場合、directory_request_user_creationは承認依頼を送るだけでアカウントは作られません。
 「承認依頼を送りました。承認されると作成されます」と伝え、作成済みとは絶対に言わないでください。
 監視カメラの通知が何時に届いたか聞かれたらget_camera_notification_time_rangeを使い、日付はYYYY-MM-DD(JST)で渡してください。
+DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 出力先はSlackなので、太字は**text**ではなく*text*、リンクは<URL|表示文字>の記法を使ってください。見出し記法(#)は使えません。`
 
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
