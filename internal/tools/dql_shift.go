@@ -154,11 +154,47 @@ func formatMinuteRange(startMin, endMin int64) string {
 	return fmt.Sprintf("%02d:%02d-%02d:%02d", startMin/60, startMin%60, endMin/60, endMin%60)
 }
 
+// timeRange は時刻の範囲(重複区間の記録用)です。
+type timeRange struct {
+	start time.Time
+	end   time.Time
+}
+
 type dqlShiftViolation struct {
 	start    time.Time
 	end      time.Time
 	startMin sql.NullInt64
 	endMin   sql.NullInt64
+	// overlaps はこの区間にマージされた元のberyx_production.reports行同士が重複していた範囲です。
+	// 連続する行が隙間なくつながっているだけ(重複なし)の場合は空です。
+	overlaps []timeRange
+}
+
+// mergeReportIntervals は同じ日の実働区間(started_at昇順)を、隙間なく連続/重複するものだけ1つにまとめます。
+// 重複があった場合はoverlapsにその重複範囲を記録します。日をまたぐ・空白期間がある行は別区間のままです。
+func mergeReportIntervals(rows []dqlShiftViolation) []dqlShiftViolation {
+	if len(rows) == 0 {
+		return nil
+	}
+	merged := []dqlShiftViolation{rows[0]}
+	for _, r := range rows[1:] {
+		cur := &merged[len(merged)-1]
+		if r.start.After(cur.end) {
+			merged = append(merged, r)
+			continue
+		}
+		if r.start.Before(cur.end) {
+			overlapEnd := r.end
+			if cur.end.Before(overlapEnd) {
+				overlapEnd = cur.end
+			}
+			cur.overlaps = append(cur.overlaps, timeRange{start: r.start, end: overlapEnd})
+		}
+		if r.end.After(cur.end) {
+			cur.end = r.end
+		}
+	}
+	return merged
 }
 
 // shiftComplianceResolution はシフト遵守チェックの解決結果です。
@@ -236,20 +272,37 @@ func resolveShiftViolations(ctx context.Context, db *sql.DB, name, beryxName, fr
 	defer rows.Close()
 
 	var total int
-	var violations []dqlShiftViolation
+	var allRows []dqlShiftViolation
 	for rows.Next() {
 		var v dqlShiftViolation
 		if err := rows.Scan(&v.start, &v.end, &v.startMin, &v.endMin); err != nil {
 			return shiftComplianceResolution{}, err
 		}
 		total++
-		if isOutsideShift(v) {
-			violations = append(violations, v)
-		}
+		allRows = append(allRows, v)
 	}
 	if err := rows.Err(); err != nil {
 		return shiftComplianceResolution{}, err
 	}
+
+	// 同じ日の行(started_at昇順で並んでいる)ごとにまとめてから、隙間なく連続/重複する区間をマージする。
+	var violations []dqlShiftViolation
+	var dayRows []dqlShiftViolation
+	flushDay := func() {
+		for _, seg := range mergeReportIntervals(dayRows) {
+			if isOutsideShift(seg) {
+				violations = append(violations, seg)
+			}
+		}
+		dayRows = nil
+	}
+	for _, v := range allRows {
+		if len(dayRows) > 0 && !sameDate(dayRows[0].start, v.start) {
+			flushDay()
+		}
+		dayRows = append(dayRows, v)
+	}
+	flushDay()
 
 	return shiftComplianceResolution{
 		DQLStaff:   dqlStaffMatch,
@@ -287,6 +340,9 @@ func checkDQLShiftCompliance(ctx context.Context, db *sql.DB, name, beryxName, f
 			shiftLabel = "シフトは" + formatMinuteRange(v.startMin.Int64, v.endMin.Int64)
 		}
 		b.WriteString(fmt.Sprintf("- %s〜%s (%s)\n", v.start.Format("2006-01-02 15:04"), v.end.Format("15:04"), shiftLabel))
+		for _, ov := range v.overlaps {
+			b.WriteString(fmt.Sprintf("  時間重複: %s（%s〜%s）\n", formatDurationJa(ov.end.Sub(ov.start)), ov.start.Format("15:04"), ov.end.Format("15:04")))
+		}
 	}
 	return b.String(), nil
 }
@@ -300,6 +356,13 @@ func isOutsideShift(v dqlShiftViolation) bool {
 	shiftStart := day.Add(time.Duration(v.startMin.Int64) * time.Minute)
 	shiftEnd := day.Add(time.Duration(v.endMin.Int64) * time.Minute)
 	return v.start.Before(shiftStart) || v.end.After(shiftEnd)
+}
+
+// sameDate はtとuが同じ日(年月日)かを返します。
+func sameDate(t, u time.Time) bool {
+	ty, tm, td := t.Date()
+	uy, um, ud := u.Date()
+	return ty == uy && tm == um && td == ud
 }
 
 func ambiguousStaffMessage(name string, candidates []dqlStaff) string {

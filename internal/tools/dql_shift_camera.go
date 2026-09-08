@@ -83,13 +83,16 @@ func buildStaffAttendanceSummary(ctx context.Context, db *sql.DB, cameraClient C
 		} else {
 			b.WriteString("        - その日はシフト登録なし\n")
 		}
+		for _, ov := range v.overlaps {
+			b.WriteString("      - 時間重複\n")
+			b.WriteString(fmt.Sprintf("        - %s（%s〜%s）\n", formatDurationJa(ov.end.Sub(ov.start)), ov.start.Format("15:04"), ov.end.Format("15:04")))
+		}
 
 		camFirst, camLast, camCount, err := firstLastNotification(ctx, cameraClient, cameraChannelID, cameraUserID, day, day.AddDate(0, 0, 1))
 		if err != nil {
 			return "", fmt.Errorf("get camera notifications: %w", err)
 		}
 		if camCount == 0 {
-			b.WriteString("      - 防犯センサー: 検知なし\n")
 			continue
 		}
 		camFirst = camFirst.In(cameraNotifyJST)
