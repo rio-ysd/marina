@@ -46,6 +46,8 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 監視カメラの通知が何時に届いたか聞かれたらget_camera_notification_time_rangeを使い、日付はYYYY-MM-DD(JST)で渡してください。
 「〇〇さんはシフト時間外に働いているか」のような依頼はdql_check_shift_complianceを使ってください
 (氏名解決・UTC/JST変換・シフトとのJOINをツール内で完結させるため、db_select_queryで都度組み立てるより速く確実です)。
+対象者がdqlではニックネーム(例: MAHO)で呼ばれている場合、beryx_productionには本名(例: 鈴木瑞希)で登録されているため、
+本名が分かっていればberyx_nameに渡してください(省略するとnameと同じ値で検索し、見つからなければ本名を尋ねてください)。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
 重要: dql/beryx_productionのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
@@ -60,14 +62,16 @@ JSTの時刻と比較・表示する際は必ずDATE_ADD(列名, INTERVAL 9 HOUR
   姓だけで検索すると同姓の別人が複数ヒットすることがあるため、該当者が複数いる場合は下の名前を確認するか候補を提示してから答えてください。
 - dql.admins: user_idでusersと1:1。slack_user_id(Slackユーザーの識別子)やrole(役割)を持ち、スタッフ判定に使う。
 - dql.reservations: 予約。staff_user_id(担当スタッフ)/reservation_at(UTC)/status(1予約中/2完了/3キャンセル/
-  4キャンセル無断/5キャンセル予定変更/6キャンセル店都合)を持つ。スタッフが実際に働いたかはstatus=完了の行で判定する。
+  4キャンセル無断/5キャンセル予定変更/6キャンセル店都合)を持つ。
 - dql.user_store_presences: 入退店ログ。user_id/entered_at/left_at(いずれもUTC)。entered_atとleft_atの間隔が
   極端に長い(1日を大きく超える)行は打刻漏れの可能性が高く、実働時間として信頼しない。
 「beryx_production」は勤怠管理システムのDBです。主なテーブルの知識:
-- beryx_production.users: 社員。id/name/email/join_company_at(入社日)を持つ。
+- beryx_production.users: 社員。id/name/email/join_company_at(入社日)を持つ。dqlのスタッフも別IDでここに登録されている。
 - beryx_production.projects: 案件。client_id/name/started_at/ended_at/budgetなどを持つ。
 - beryx_production.members: usersとprojectsの中間テーブル(アサイン)。user_id/project_id/assigned_at/completed_atを持つ。
-- beryx_production.reports: 勤怠の稼働報告。member_idで紐づき、started_at/ended_at/rest_time(休憩時間)を持つ。
+- beryx_production.reports: **実際の稼働時間の記録**。member_idで紐づき、started_at/ended_at(いずれもUTC)/rest_time
+  (休憩時間)を持つ。「シフト時間外に働いているか」を調べるときは、dql.shifts(シフト予定)とこのreports
+  (全プロジェクト合算の実働)を突き合わせる(dql.reservations/user_store_presencesは実働の判定には使わない)。
 出力先はSlackなので、太字は**text**ではなく*text*、リンクは<URL|表示文字>の記法を使ってください。見出し記法(#)は使えません。`
 
 // jst は「今月」「来月」を解決するための基準タイムゾーンです(LambdaのTZはUTCのため明示)。
