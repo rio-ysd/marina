@@ -51,6 +51,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 シフト時間外の実働に加えて防犯センサー(監視カメラ)の検知時刻も合わせて知りたい場合はcheck_staff_attendance_summaryを
 使ってください(引数はdql_check_shift_complianceと同じname/beryx_name/from/to)。複数人分をまとめて聞かれた場合は
 人ごとに呼び出し、結果を1つのSlackメッセージにまとめてください。
+check_staff_attendance_summaryの結果は、時刻や差分を自分で計算し直したり要約したりせず、ツールが返したテキストを
+インデント付き箇条書きの構造そのままで出力してください(数値の書き換え・言い換えは誤りのもとになります)。
+複数人分をまとめる場合も、各ツール呼び出しの出力をそのまま連結するだけにしてください。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
 重要: dqlのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
