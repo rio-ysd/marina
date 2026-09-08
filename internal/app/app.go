@@ -181,6 +181,7 @@ func New(cfg *config.Config) (*App, error) {
 	// 外部DB(dql、beryx_productionなど複数のスキーマ)を対象にする。3つとも設定されている場合のみツールを登録する。
 	// デフォルトデータベースは選択せず、クエリ側で`データベース名.テーブル名`と完全修飾させる。
 	var dbQueryTools []anthropic.BetaTool
+	var dqlShiftTools []anthropic.BetaTool
 	if cfg.HasExternalDBCredentials() {
 		externalDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/?parseTime=true&loc=Local",
 			cfg.ExternalDBUser, cfg.ExternalDBPass, cfg.ExternalDBHost)
@@ -191,6 +192,10 @@ func New(cfg *config.Config) (*App, error) {
 		dbQueryTools, err = tools.NewDBQueryTools(externalDB)
 		if err != nil {
 			return nil, fmt.Errorf("build db query tools: %w", err)
+		}
+		dqlShiftTools, err = tools.NewDQLShiftComplianceTools(externalDB)
+		if err != nil {
+			return nil, fmt.Errorf("build dql shift compliance tools: %w", err)
 		}
 	} else {
 		log.Println("db query tool disabled: DB_HOST/DB_USER/DB_PASS is not set")
@@ -212,7 +217,7 @@ func New(cfg *config.Config) (*App, error) {
 	var allTools []anthropic.BetaTool
 	for _, set := range [][]anthropic.BetaTool{
 		taskTools, reminderTools, gmailTools, driveTools, calendarTools, sheetsTools,
-		peopleTools, directoryTools, mfTools, cameraNotifyTools, dbQueryTools,
+		peopleTools, directoryTools, mfTools, cameraNotifyTools, dbQueryTools, dqlShiftTools,
 	} {
 		allTools = append(allTools, set...)
 	}
