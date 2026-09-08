@@ -177,11 +177,23 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("build mf invoice tools: %w", err)
 	}
 
+	// 監視カメラ通知チャンネルの取得はUser OAuthトークン(groups:history)が必要なので、
+	// SlackUserOAuthTokenと対象チャンネル/ユーザーIDがすべて設定されている場合のみ登録する。
+	var cameraNotifyTools []anthropic.BetaTool
+	if cfg.SlackUserOAuthToken != "" && cfg.CameraNotifyChannelID != "" && cfg.CameraNotifyUserID != "" {
+		cameraNotifyTools, err = tools.NewCameraNotifyTools(slackapi.New(cfg.SlackUserOAuthToken), cfg.CameraNotifyChannelID, cfg.CameraNotifyUserID)
+		if err != nil {
+			return nil, fmt.Errorf("build camera notify tools: %w", err)
+		}
+	} else {
+		log.Println("camera notify tool disabled: SLACK_USER_OAUTH_TOKEN/CAMERA_NOTIFY_CHANNEL_ID/CAMERA_NOTIFY_USER_ID is not set")
+	}
+
 	// ツールの並び順はClaudeへの提示順。連携が増えたら追加するだけで済むようにまとめて連結する。
 	var allTools []anthropic.BetaTool
 	for _, set := range [][]anthropic.BetaTool{
 		taskTools, reminderTools, gmailTools, driveTools, calendarTools, sheetsTools,
-		peopleTools, directoryTools, mfTools,
+		peopleTools, directoryTools, mfTools, cameraNotifyTools,
 	} {
 		allTools = append(allTools, set...)
 	}

@@ -66,6 +66,13 @@ type Config struct {
 	// ProxyReplyIncludeDM は本人へのDMも代理返信の対象にするか(既定: true)。
 	// 有効にするにはUser OAuthトークンに im:history スコープが必要。
 	ProxyReplyIncludeDM bool
+
+	// CameraNotifyChannelID は監視カメラの通知が届くSlackチャンネルID。
+	// CameraNotifyUserID はその通知を投稿するユーザー/ボットのSlackユーザーID。
+	// 両方とSlackUserOAuthTokenが設定されている場合のみget_camera_notification_time_rangeツールを登録する
+	// (対象がプライベートチャンネルのため、groups:historyスコープを持つUser OAuthトークンが必要)。
+	CameraNotifyChannelID string
+	CameraNotifyUserID    string
 }
 
 // Load は環境変数からConfigを構築します。必須項目が欠けている場合はerrorを返します。
@@ -96,6 +103,8 @@ func Load() (*Config, error) {
 		ProxyReplyTargetUserID:      os.Getenv("PROXY_REPLY_TARGET_USER_ID"),
 		ProxyReplyChannelIDs:        splitAndTrim(os.Getenv("PROXY_REPLY_CHANNEL_IDS")),
 		ProxyReplyIncludeDM:         getEnvBool("PROXY_REPLY_INCLUDE_DM", true),
+		CameraNotifyChannelID:       strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_CHANNEL_ID")),
+		CameraNotifyUserID:          strings.TrimSpace(os.Getenv("CAMERA_NOTIFY_USER_ID")),
 	}
 
 	required := map[string]string{
