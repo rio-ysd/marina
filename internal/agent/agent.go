@@ -46,6 +46,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 監視カメラの通知が何時に届いたか聞かれたらget_camera_notification_time_rangeを使い、日付はYYYY-MM-DD(JST)で渡してください。
 DBの中身を直接確認したい場合はdb_select_queryを使います(SELECT文のみ、最大200行)。テーブル構造が不明ならinformation_schema.columnsを先に調べてください。
 db_select_queryは複数のDBに接続できるため、テーブル名は必ず「データベース名.テーブル名」(例: dql.shifts, beryx_production.projects)で完全修飾してください。
+重要: dql/beryx_productionのDATETIME列(reservation_at, entered_at, left_at, created_at等)はUTCで保存されています。
+JSTの時刻と比較・表示する際は必ずDATE_ADD(列名, INTERVAL 9 HOUR)で変換してください(変換を忘れると実際より9時間早い時刻に見えます)。
+一方dql.shifts.shift_hourはUTC変換が不要な、その日0時からの分数(JST)としてそのまま保存されています。
 「dql」はサロン予約管理システムのDBです。主なテーブルの知識:
 - dql.shifts: shift_date(YYYY-MM-DD文字列)とshift_hour(その日0時からの分数。例: 540=9:00, 570=9:30)の組み合わせが
   30分単位のシフト1コマを表す。1人のスタッフの1日のシフトは複数行になる。user_idでdql.usersに紐づく。
@@ -54,6 +57,10 @@ db_select_queryは複数のDBに接続できるため、テーブル名は必ず
   dql.usersを単独で検索せずdql.adminsとJOINして絞り込んでください(顧客が同姓同名でヒットするのを防ぐため)。
   姓だけで検索すると同姓の別人が複数ヒットすることがあるため、該当者が複数いる場合は下の名前を確認するか候補を提示してから答えてください。
 - dql.admins: user_idでusersと1:1。slack_user_id(Slackユーザーの識別子)やrole(役割)を持ち、スタッフ判定に使う。
+- dql.reservations: 予約。staff_user_id(担当スタッフ)/reservation_at(UTC)/status(1予約中/2完了/3キャンセル/
+  4キャンセル無断/5キャンセル予定変更/6キャンセル店都合)を持つ。スタッフが実際に働いたかはstatus=完了の行で判定する。
+- dql.user_store_presences: 入退店ログ。user_id/entered_at/left_at(いずれもUTC)。entered_atとleft_atの間隔が
+  極端に長い(1日を大きく超える)行は打刻漏れの可能性が高く、実働時間として信頼しない。
 「beryx_production」は勤怠管理システムのDBです。主なテーブルの知識:
 - beryx_production.users: 社員。id/name/email/join_company_at(入社日)を持つ。
 - beryx_production.projects: 案件。client_id/name/started_at/ended_at/budgetなどを持つ。
