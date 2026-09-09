@@ -82,11 +82,17 @@ func (s dqlStaff) plainName() string {
 // findDQLStaff はdql.adminsにレコードがあるusersのみを対象に名前の部分一致で検索します。
 func findDQLStaff(ctx context.Context, db *sql.DB, name string) ([]dqlStaff, error) {
 	like := "%" + name + "%"
+	// 「藤原香織」のように姓名がスペース無しで渡されても、name/last_nameが別カラムなのでヒットするよう、
+	// スペースを除いた姓名の連結(藤原+香織 / 香織+藤原の両順)とも比較する。
+	likeNoSpace := "%" + strings.ReplaceAll(name, " ", "") + "%"
 	rows, err := db.QueryContext(ctx, `
 		SELECT u.id, u.name, u.last_name
 		FROM dql.users u
 		JOIN dql.admins a ON a.user_id = u.id
-		WHERE u.name LIKE ? OR u.last_name LIKE ?`, like, like)
+		WHERE u.name LIKE ? OR u.last_name LIKE ?
+		   OR REPLACE(CONCAT(IFNULL(u.last_name, ''), u.name), ' ', '') LIKE ?
+		   OR REPLACE(CONCAT(u.name, IFNULL(u.last_name, '')), ' ', '') LIKE ?`,
+		like, like, likeNoSpace, likeNoSpace)
 	if err != nil {
 		return nil, fmt.Errorf("find dql staff: %w", err)
 	}
@@ -112,7 +118,11 @@ type beryxUser struct {
 // findBeryxUser はberyx_production.usersを名前の部分一致で検索します。
 func findBeryxUser(ctx context.Context, db *sql.DB, name string) ([]beryxUser, error) {
 	like := "%" + name + "%"
-	rows, err := db.QueryContext(ctx, `SELECT id, name FROM beryx_production.users WHERE name LIKE ?`, like)
+	// beryx_production.usersのnameは"姓 名"(スペース区切り)のため、スペース無しの検索語でもヒットするようにする。
+	likeNoSpace := "%" + strings.ReplaceAll(name, " ", "") + "%"
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, name FROM beryx_production.users
+		WHERE name LIKE ? OR REPLACE(name, ' ', '') LIKE ?`, like, likeNoSpace)
 	if err != nil {
 		return nil, fmt.Errorf("find beryx user: %w", err)
 	}
