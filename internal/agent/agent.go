@@ -200,12 +200,70 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 	}
 
 	replyText := replyOrFallback(final)
+	// 数値を含むツール結果はClaudeが言い換える過程で書き換えてしまうことがあるため、
+	// 該当ツールが呼ばれていた場合は生成された文章を使わず、ツールの出力をそのまま返信にする。
+	if verbatim := extractVerbatimToolResults(runner.Messages()); len(verbatim) > 0 {
+		replyText = strings.Join(verbatim, "\n")
+	}
 
 	if err := a.saveExchange(ctx, threadKey, userText, replyText); err != nil {
 		return "", err
 	}
 
 	return replyText, nil
+}
+
+// verbatimToolNames はここに列挙したツールの結果を、Claudeの言い換えを介さずそのままSlackへの返信に使います。
+// 時刻・時間差など数値を含む結果をLLMが文章に組み込む過程で書き換えてしまう事例が確認されたための対策です。
+var verbatimToolNames = map[string]bool{
+	"check_staff_attendance_summary": true,
+	"dql_check_shift_compliance":     true,
+}
+
+// extractVerbatimToolResults はrunnerの会話履歴から、verbatimToolNamesに該当するtool_resultの本文を
+// 呼び出し順に取り出します(該当が無ければ空を返します)。
+func extractVerbatimToolResults(messages []anthropic.BetaMessageParam) []string {
+	toolNameByID := map[string]string{}
+	for _, m := range messages {
+		if m.Role != anthropic.BetaMessageParamRoleAssistant {
+			continue
+		}
+		for _, c := range m.Content {
+			if c.OfToolUse != nil {
+				toolNameByID[c.OfToolUse.ID] = c.OfToolUse.Name
+			}
+		}
+	}
+
+	var results []string
+	for _, m := range messages {
+		if m.Role != anthropic.BetaMessageParamRoleUser {
+			continue
+		}
+		for _, c := range m.Content {
+			if c.OfToolResult == nil || !verbatimToolNames[toolNameByID[c.OfToolResult.ToolUseID]] {
+				continue
+			}
+			for _, content := range c.OfToolResult.Content {
+				if content.OfText != nil {
+					results = append(results, stripVerbatimNotice(content.OfText.Text))
+				}
+			}
+		}
+	}
+	return results
+}
+
+// stripVerbatimNotice はtools.verbatimResultが先頭に付ける「重要: ...」の注意書きを取り除きます
+// (Claude向けの指示であり、Slackへの返信本文には不要なため)。
+func stripVerbatimNotice(text string) string {
+	if !strings.HasPrefix(text, "重要:") {
+		return text
+	}
+	if idx := strings.Index(text, "\n\n"); idx != -1 {
+		return text[idx+len("\n\n"):]
+	}
+	return text
 }
 
 // saveExchange はユーザー発話とmarinaの応答を会話履歴に残します。
