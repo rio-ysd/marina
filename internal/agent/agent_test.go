@@ -93,6 +93,21 @@ func TestSystemPromptIncludesCustomInstructions(t *testing.T) {
 	}
 }
 
+func TestSystemPromptIncludesShiftSchedulingPolicy(t *testing.T) {
+	now := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	got := systemPromptWithDate(now, "")
+
+	if !strings.Contains(got, "休むなら休むで問題ない") {
+		t.Fatalf("shift policy should mention taking leave without make-up work, got:\n%s", got)
+	}
+	if !strings.Contains(got, "10:00-19:00") {
+		t.Fatalf("shift policy should mention the weekday time window, got:\n%s", got)
+	}
+	if !strings.Contains(got, "補填") {
+		t.Fatalf("shift policy should explicitly forbid make-up shifts, got:\n%s", got)
+	}
+}
+
 // 本人判定はPROXY_REPLY_TARGET_USER_IDと一致したときだけ成立し、未設定なら誰も本人扱いしないこと。
 func TestIsOwner(t *testing.T) {
 	withOwner := &Agent{ownerUserID: "U123"}

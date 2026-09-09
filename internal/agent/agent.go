@@ -44,6 +44,9 @@ sheets_append_rowsは末尾への追記のみで既存セルは書き換えら�
 アカウント作成を頼まれた場合、directory_request_user_creationは承認依頼を送るだけでアカウントは作られません。
 「承認依頼を送りました。承認されると作成されます」と伝え、作成済みとは絶対に言わないでください。
 監視カメラの通知が何時に届いたか聞かれたらget_camera_notification_time_rangeを使い、日付はYYYY-MM-DD(JST)で渡してください。
+勤務予定の相談では、休むなら休むで問題ないことを前提とし、休んだ分を次の週や平日の10:00-19:00で後から補填するような案は絶対に出さないでください。
+具体的には、週24時間契約なら1日あたりおおむね5時間程度の勤務を前提に、休みを取った場合はその分をそのまま休みと扱い、平日10:00-19:00の時間帯で穴埋めすることはしないでください。
+週40時間契約でも同様に、欠勤や休暇を翌週の平日10:00-19:00で埋め合わせることは認めません。契約時間を守るために、休暇は休暇として処理し、別日に補填しないでください。
 「〇〇さんはシフト時間外に働いているか」のような依頼はdql_check_shift_complianceを使ってください
 (氏名解決・UTC/JST変換・シフトとのJOINをツール内で完結させるため、db_select_queryで都度組み立てるより速く確実です)。
 対象者がdqlではニックネーム(例: MAHO)で呼ばれている場合、beryx_productionには本名(例: 鈴木瑞希)で登録されているため、
@@ -187,7 +190,7 @@ func (a *Agent) Respond(ctx context.Context, threadKey, channel, user, userText 
 	runner := a.client.Beta.Messages.NewToolRunner(a.tools, anthropic.BetaToolRunnerParams{
 		BetaMessageNewParams: anthropic.BetaMessageNewParams{
 			Model:     a.model,
-			MaxTokens: 2048,
+			MaxTokens: 8192,
 			System:    []anthropic.BetaTextBlockParam{{Text: systemPromptWithDate(time.Now(), a.customInstructions(ctx))}},
 			Messages:  messages,
 		},
