@@ -17,6 +17,7 @@ const dqlShiftDefaultRangeDays = 30
 type dqlShiftComplianceInput struct {
 	Name      string `json:"name"`
 	BeryxName string `json:"beryx_name"`
+	Month     string `json:"month"`
 	From      string `json:"from"`
 	To        string `json:"to"`
 }
